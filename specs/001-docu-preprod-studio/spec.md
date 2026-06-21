@@ -138,7 +138,7 @@ Restart the app and verify all settings persist.
   the word-count estimate for the target duration?
 - What happens when a TTS API call fails mid-run (e.g., after 3 of 8 scenes are done)?
 - What happens when a stock footage search returns zero results for a scene?
-- What happens when the user cancels a run that is already in progress?
+- What happens when the user cancels a run that is already in progress? *(Resolved: see Clarifications)*
 - What happens when the output folder does not exist or is not writable?
 - What happens when the FCPXML export fails after all media files have been generated?
 - What happens when web search for trending topics returns results in a language other
@@ -232,13 +232,35 @@ Restart the app and verify all settings persist.
 
 - **FR-025**: The app MUST display real-time progress during a run, showing at minimum the
   current stage name and current scene being processed.
+- **FR-031**: Scenes MUST be processed sequentially: each scene's full pipeline (TTS,
+  footage search, sync) MUST complete before the next scene begins. Parallel scene
+  processing is explicitly out of scope for v1.
+- **FR-032**: The app's main screen MUST display a list of past runs, showing at minimum
+  the topic, run date/time, status (completed / cancelled / failed), and a link or button
+  to open the corresponding project folder in the OS file browser. Run history MUST
+  persist across application restarts.
+- **FR-033**: When a run fails (all retries exhausted on any stage), all per-scene files
+  already written to the project folder MUST be retained. The run log MUST record the
+  failure point. Run resume is explicitly out of scope for v1; users start a new run
+  to retry.
 - **FR-026**: The app MUST display a clear, human-readable error message in the GUI if any
-  stage fails, without crashing or silently continuing with bad data.
+  stage fails after all retries are exhausted (see FR-030), without crashing or silently
+  continuing with bad data.
+- **FR-030**: For every external API call, the app MUST automatically retry up to 3 times
+  using exponential backoff before treating the call as failed. Only after all 3 retries
+  fail MUST the error be surfaced to the GUI and recorded in the run log.
 
 **Platform**
 
 - **FR-027**: The application MUST run as a native desktop app on both Windows and macOS
   with identical features and behavior.
+
+**Run Cancellation**
+
+- **FR-029**: The app MUST provide a Cancel button visible during an active run.
+  When the user cancels, the run MUST stop immediately; all per-scene files already
+  written to the project folder MUST be retained as-is. The project folder MUST NOT
+  be deleted on cancellation. The run log MUST record the cancellation point.
 
 **Out of Scope**
 
@@ -249,7 +271,9 @@ Restart the app and verify all settings persist.
 ### Key Entities
 
 - **Run**: A single execution of the pipeline. Has a mode (Guided/Full Automation), a
-  topic (user-supplied or discovered), a target duration, an output folder, and a status.
+  topic (user-supplied or discovered), a target duration, an output folder, a status
+  (completed / cancelled / failed), and a date/time. Runs persist across app restarts
+  and are displayed in the main screen history list.
 - **Scene**: A discrete segment of a documentary. Has a title, narration text, audio
   duration (measured from generated TTS output), visual keywords, and an assembly of
   footage clips that together match the audio duration.
@@ -301,3 +325,16 @@ Restart the app and verify all settings persist.
   subject suitable for a documentary (not a disambiguation page, an ad, or a malformed
   result).
 - Concurrent runs are out of scope for v1; the app supports one active run at a time.
+- Run resume (continuing from the last completed scene after failure or cancellation) is
+  out of scope for v1; users start a new run to retry. Partial project folder files are
+  always retained for manual use in Filmora.
+
+## Clarifications
+
+### Session 2026-06-22
+
+- Q: When the user cancels an active run, what happens to partially generated files? → A: Stop immediately; keep all per-scene files already written to the project folder (partial but usable); do not delete the project folder; record cancellation point in run log.
+- Q: When an external API call fails, does the app retry or surface the error immediately? → A: Auto-retry up to 3 times with exponential backoff; surface error to GUI and log only after all 3 retries fail.
+- Q: Are scenes processed sequentially or in parallel? → A: Sequential — each scene's full pipeline (TTS, footage, sync) completes before the next begins; parallel processing is out of scope for v1.
+- Q: Does the app track and display previous runs, or is it stateless after a run completes? → A: App shows a list of past runs on the main screen (topic, date/time, status, link to project folder); run history persists across restarts.
+- Q: Can a failed or cancelled run be resumed from the last completed scene? → A: No resume in v1; user starts a new run; partial project folder files are retained and accessible.
