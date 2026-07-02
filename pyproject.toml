@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "docu_studio"
+version = "0.1.0"
+description = "Documentary Pre-Production Studio — automated research, scripting, voice-over, footage assembly, and FCPXML export"
+requires-python = ">=3.11"
+dependencies = [
+    "customtkinter>=5.2.0",
+    "anthropic>=0.25.0",
+    "edge-tts>=6.1.0",
+    "elevenlabs>=1.2.0",
+    "keyring>=25.0.0",
+    "imageio-ffmpeg>=0.4.9",
+    "requests>=2.31.0",
+    "platformdirs>=4.2.0",
+    "pywebview>=4.4",
+    "pyqt6>=6.11.0",
+    "qtpy>=2.4.3",
+    "pyqt6-webengine>=6.11.0",
+    "pyqt5>=5.15.11",
+    "pyqtwebengine>=5.15.7",
+    "gtts>=2.5.4",
+]
+
+[project.scripts]
+docu-studio = "docu_studio.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["docu_studio*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["docu_studio"]
+omit = ["tests/*", "docu_studio/gui/*", "docu_studio/__main__.py"]

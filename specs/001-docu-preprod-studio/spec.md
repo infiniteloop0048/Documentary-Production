@@ -11,7 +11,7 @@
 ### User Story 1 - Guided Mode End-to-End Run (Priority: P1)
 
 A documentarian provides a topic (e.g., "The Apollo 11 mission") and a target duration of
-35 minutes. The app generates a complete script, breaks it into scenes, creates per-scene
+20 minutes. The app generates a complete script, breaks it into scenes, creates per-scene
 voice-over audio, finds and trims matching stock footage for each scene, assembles a synced
 timeline, and exports an FCPXML project file ready to open in Filmora. The user watches
 real-time progress throughout and receives a self-contained project folder with all
@@ -160,7 +160,13 @@ Restart the app and verify all settings persist.
 **Topic Discovery (Full Automation Mode)**
 
 - **FR-004**: The app MUST perform a live web search to find a currently trending and
-  relevant documentary topic when Full Automation Mode is selected.
+  relevant documentary topic when Full Automation Mode is selected. "Trending" is
+  operationally defined as: a top-10 result from the configured search provider, dated
+  within the past 7 days where date metadata is available, and identifiable as a real,
+  non-commercial documentary subject (not a disambiguation page, advertisement, or
+  malformed result). If the provider returns no date metadata, recency cannot be
+  verified; the result is treated as usable if it otherwise qualifies (see Assumptions
+  for the full definition of "usable").
 - **FR-005**: If web search fails or returns no usable result, the app MUST fall back to
   an AI-generated topic suggestion without stopping the run.
 - **FR-006**: The app MUST clearly label in both the GUI and run log whether the topic

@@ -19,11 +19,11 @@
 
 **Purpose**: Create the project skeleton so all subsequent tasks have a home.
 
-- [ ] T001 Create full `docu_studio/` package tree with empty `__init__.py` files per plan.md directory structure
-- [ ] T002 Create `pyproject.toml` declaring Python 3.11+, package name `docu_studio`, entry point `docu_studio.__main__:main`, and all runtime dependencies
-- [ ] T003 [P] Create `requirements.txt` (customtkinter, anthropic, edge-tts, elevenlabs, keyring, imageio-ffmpeg, requests, platformdirs)
-- [ ] T004 [P] Create `requirements-dev.txt` (pytest, pytest-asyncio, pytest-cov, responses, ruff)
-- [ ] T005 [P] Create `tests/` directory with `tests/unit/`, `tests/integration/`, and `tests/conftest.py` stubs
+- [X] T001 Create full `docu_studio/` package tree with empty `__init__.py` files per plan.md directory structure
+- [X] T002 Create `pyproject.toml` declaring Python 3.11+, package name `docu_studio`, entry point `docu_studio.__main__:main`, and all runtime dependencies
+- [X] T003 [P] Create `requirements.txt` (customtkinter, anthropic, edge-tts, elevenlabs, keyring, imageio-ffmpeg, requests, platformdirs)
+- [X] T004 [P] Create `requirements-dev.txt` (pytest, pytest-asyncio, pytest-cov, responses, ruff)
+- [X] T005 [P] Create `tests/` directory with `tests/unit/`, `tests/integration/`, and `tests/conftest.py` stubs
 
 ---
 
@@ -33,14 +33,14 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T006 Implement `docu_studio/platform_layer.py` with `config_dir() -> Path`, `ffmpeg_exe() -> str`, `ffprobe_exe() -> str` — all OS branches isolated here only (no `platform.system()` elsewhere)
-- [ ] T007 [P] Implement `docu_studio/licensing.py` with `check_license() -> bool: return True` and a comment marking it as the Phase 2 insertion point
-- [ ] T008 [P] Implement `docu_studio/retry.py` with `@retry(max_attempts=3, backoff_factor=2.0, base_delay=1.0)` decorator — catches Exception, re-raises unchanged on final attempt
-- [ ] T009 Implement `docu_studio/config/defaults.py` (DEFAULT_WPM=150, DEFAULT_LLM_MODEL_SCRIPT, DEFAULT_LLM_MODEL_KEYWORDS, DEFAULT_TTS_PROVIDER, DEFAULT_FOOTAGE_PROVIDERS list)
-- [ ] T010 Implement `docu_studio/config/settings.py` — `Settings` dataclass with `load() / save()` for non-secret JSON fields via `platformdirs.user_config_dir()`, and `get_key(provider) / set_key(provider, value)` via `keyring`
-- [ ] T011 [P] Implement `docu_studio/pipeline/events.py` — `ProgressEvent`, `LogEvent`, `ErrorEvent`, `LogLevel` as frozen dataclasses; define `PipelineEvent = Union[...]`
-- [ ] T012 [P] Implement `docu_studio/output/project_folder.py` — `create_project_folder(topic: str, ts: datetime, base: Path) -> Path`; creates `{topic}_{timestamp}/`, `audio/`, `video/` subdirs; writes `script.md` and `scenes.json` placeholders
-- [ ] T013 [P] Implement `docu_studio/history/run_history.py` — `RunRecord` dataclass with `to_dict/from_dict`; `load_history() -> List[RunRecord]`; `save_run(run: RunRecord)` with atomic write and max-100 pruning
+- [X] T006 Implement `docu_studio/platform_layer.py` with `config_dir() -> Path`, `ffmpeg_exe() -> str`, `ffprobe_exe() -> str`, and `open_folder(path: Path) -> None` (Windows: `os.startfile(str(path))`; macOS: `subprocess.call(["open", str(path)])`) — all OS-conditional branches isolated here only; no `platform.system()` calls permitted elsewhere in the codebase (Constitution VI)
+- [X] T007 [P] Implement `docu_studio/licensing.py` with `check_license() -> bool: return True` and a comment marking it as the Phase 2 insertion point
+- [X] T008 [P] Implement `docu_studio/retry.py` with `@retry(max_attempts=3, backoff_factor=2.0, base_delay=1.0)` decorator — catches Exception, re-raises unchanged on final attempt
+- [X] T009 Implement `docu_studio/config/defaults.py` (DEFAULT_WPM=150, DEFAULT_LLM_MODEL_SCRIPT, DEFAULT_LLM_MODEL_KEYWORDS, DEFAULT_TTS_PROVIDER, DEFAULT_FOOTAGE_PROVIDERS list)
+- [X] T010 Implement `docu_studio/config/settings.py` — `Settings` dataclass with `load() / save()` for non-secret JSON fields via `platformdirs.user_config_dir()`, and `get_key(provider) / set_key(provider, value)` via `keyring`
+- [X] T011 [P] Implement `docu_studio/pipeline/events.py` — `ProgressEvent`, `LogEvent`, `ErrorEvent`, `LogLevel` as frozen dataclasses; define `PipelineEvent = Union[...]`; include `sanitize_log_message(msg: str, keys: Iterable[str]) -> str` that replaces any key substring with `"***REDACTED***"` — all adapters MUST call this before constructing any `LogEvent.message` (Constitution IV)
+- [X] T012 [P] Implement `docu_studio/output/project_folder.py` — `create_project_folder(topic: str, ts: datetime, base: Path) -> Path`; creates `{topic}_{timestamp}/`, `audio/`, `video/` subdirs; writes `script.md` and `scenes.json` placeholders
+- [X] T013 [P] Implement `docu_studio/history/run_history.py` — `RunRecord` dataclass with fields: `topic: str`, `mode: str`, `status: str`, `started_at: datetime`, `project_folder: Path`, `topic_source: str` (values: `"web_search"` | `"ai_suggested"` | `"user_supplied"`), `fallback_triggered: bool`; `to_dict/from_dict`; `load_history() -> List[RunRecord]`; `save_run(run: RunRecord)` with atomic write and max-100 pruning
 
 **Checkpoint**: Foundation ready — user story implementation can now begin.
 
@@ -56,56 +56,58 @@
 
 > **Write these tests FIRST; verify they FAIL before implementing the corresponding code**
 
-- [ ] T014 [P] [US1] Write unit test for `FFmpegWrapper` in `tests/unit/test_ffmpeg_wrapper.py` — mock `subprocess.run`; assert correct command args for `get_duration`, `trim_clip`, `concat_clips`, `mux_audio_video`; assert `FFmpegError` on non-zero exit
-- [ ] T015 [P] [US1] Write unit test for `fcpxml_generator` in `tests/unit/test_fcpxml_generator.py` — pass `List[FinalScene]` with known durations; assert FCPXML XML structure, scene marker count, sync gate raises `ExportSyncError` when invariant violated
-- [ ] T016 [P] [US1] Write unit test for `retry.py` in `tests/unit/test_retry.py` — mock function that raises N times; assert retry count, backoff sleep calls, and that exception propagates after all attempts exhausted
+- [X] T014 [P] [US1] Write unit test for `FFmpegWrapper` in `tests/unit/test_ffmpeg_wrapper.py` — mock `subprocess.run`; assert correct command args for `get_duration`, `trim_clip`, `concat_clips`, `mux_audio_video`; assert `FFmpegError` on non-zero exit
+- [X] T015 [P] [US1] Write unit test for `fcpxml_generator` in `tests/unit/test_fcpxml_generator.py` — pass `List[FinalScene]` with known durations; assert FCPXML XML structure, scene marker count, sync gate raises `ExportSyncError` when invariant violated
+- [X] T016 [P] [US1] Write unit test for `retry.py` in `tests/unit/test_retry.py` — mock function that raises N times; assert retry count, backoff sleep calls, and that exception propagates after all attempts exhausted
+- [X] T061 [P] [US1] Write unit test for `footage_assembly` multi-clip accumulation logic in `tests/unit/test_footage_assembly.py` — mock `FootageProvider.search` and `FFmpegWrapper`; assert: (a) clips accumulate until combined duration ≥ scene audio duration, (b) final clip is trimmed to land exactly on the audio endpoint (no overrun, no gap), (c) `footage_shortage=True` and `ErrorEvent(fatal=False)` are set when all providers exhausted before covering audio duration, (d) `FFmpegWrapper.mux_audio_video` is called exactly once per scene
+- [X] T062 [P] [US1] Write integration test for "output folder not writable" in `tests/integration/test_project_folder.py` — use `tmp_path`; patch `Path.mkdir` to raise `PermissionError`; assert `create_project_folder` raises `OSError` with a human-readable message; confirm the error message contains neither API keys nor full internal stack traces
 
 ### Implementation for User Story 1
 
 **Provider ABCs** (must precede all adapter implementations):
 
-- [ ] T017 [P] [US1] Implement `docu_studio/adapters/llm/base.py` — `LLMProvider` ABC with `generate_script`, `break_into_scenes`, `extract_visual_keywords`, `suggest_topic` abstract methods
-- [ ] T018 [P] [US1] Implement `docu_studio/adapters/tts/base.py` — `TTSProvider` ABC with `synthesize(text, output_path) -> float` abstract method
-- [ ] T019 [P] [US1] Implement `docu_studio/adapters/footage/base.py` — `FootageProvider` ABC with `search(keywords, min_duration) -> List[FootageClip]`; define `FootageClip` frozen dataclass
+- [X] T017 [P] [US1] Implement `docu_studio/adapters/llm/base.py` — `LLMProvider` ABC with `generate_script`, `break_into_scenes`, `extract_visual_keywords`, `suggest_topic` abstract methods
+- [X] T018 [P] [US1] Implement `docu_studio/adapters/tts/base.py` — `TTSProvider` ABC with `synthesize(text, output_path) -> float` abstract method
+- [X] T019 [P] [US1] Implement `docu_studio/adapters/footage/base.py` — `FootageProvider` ABC with `search(keywords, min_duration) -> List[FootageClip]`; define `FootageClip` frozen dataclass
 
 **Media layer** (depends on T006 for platform_layer):
 
-- [ ] T020 [US1] Implement `docu_studio/media/ffmpeg_wrapper.py` — `FFmpegWrapper` with `get_duration`, `trim_clip`, `concat_clips`, `mux_audio_video`; uses `imageio_ffmpeg.get_ffmpeg_exe()` and `platform_layer.ffprobe_exe()`; raises `FFmpegError` on failure
-- [ ] T021 [US1] Implement `docu_studio/media/fcpxml_generator.py` — `validate_sync(scenes, tolerance_s=0.050)` raises `ExportSyncError` on violation; `generate_fcpxml(scenes, project_folder, topic) -> str` pure function returning FCPXML 1.9 string with scene markers
+- [X] T020 [US1] Implement `docu_studio/media/ffmpeg_wrapper.py` — `FFmpegWrapper` with `get_duration`, `trim_clip`, `concat_clips`, `mux_audio_video`; uses `imageio_ffmpeg.get_ffmpeg_exe()` and `platform_layer.ffprobe_exe()`; raises `FFmpegError` on failure
+- [X] T021 [US1] Implement `docu_studio/media/fcpxml_generator.py` — `validate_sync(scenes, tolerance_s=0.050)` raises `ExportSyncError` on violation; `generate_fcpxml(scenes, project_folder, topic) -> str` pure function returning FCPXML 1.9 string with scene markers
 
 **Concrete adapters** (depend on T017–T019 for base ABCs, T008 for retry):
 
-- [ ] T022 [US1] Implement `docu_studio/adapters/llm/anthropic_adapter.py` — `AnthropicAdapter(LLMProvider)` with `@retry` on every API call; uses `anthropic` SDK; structured output via tool-use for `break_into_scenes` and `extract_visual_keywords`
-- [ ] T023 [P] [US1] Implement `docu_studio/adapters/tts/edge_tts_adapter.py` — `EdgeTTSAdapter(TTSProvider)` wrapping async `edge_tts` with `asyncio.run()`; calls `FFmpegWrapper.get_duration()` to return verified float; no API key
-- [ ] T024 [P] [US1] Implement `docu_studio/adapters/tts/elevenlabs_adapter.py` — `ElevenLabsAdapter(TTSProvider)` using `elevenlabs` SDK; key from `Settings.get_key("elevenlabs")`; `@retry` on API call
-- [ ] T025 [P] [US1] Implement `docu_studio/adapters/footage/pexels_adapter.py` — `PexelsAdapter(FootageProvider)` using `requests`; key from `Settings.get_key("pexels")`; `@retry`; returns `List[FootageClip]` ordered by relevance
-- [ ] T026 [P] [US1] Implement `docu_studio/adapters/footage/pixabay_adapter.py` — `PixabayAdapter(FootageProvider)` using `requests`; key from `Settings.get_key("pixabay")`; `@retry`; returns `List[FootageClip]`
+- [X] T022 [US1] Implement `docu_studio/adapters/llm/anthropic_adapter.py` — `AnthropicAdapter(LLMProvider)` with `@retry` on every API call; uses `anthropic` SDK; structured output via tool-use for `break_into_scenes` and `extract_visual_keywords`
+- [X] T023 [P] [US1] Implement `docu_studio/adapters/tts/edge_tts_adapter.py` — `EdgeTTSAdapter(TTSProvider)` wrapping async `edge_tts` with `asyncio.run()`; calls `FFmpegWrapper.get_duration()` to return verified float; no API key
+- [X] T024 [P] [US1] Implement `docu_studio/adapters/tts/elevenlabs_adapter.py` — `ElevenLabsAdapter(TTSProvider)` using `elevenlabs` SDK; key from `Settings.get_key("elevenlabs")`; `@retry` on API call
+- [X] T025 [P] [US1] Implement `docu_studio/adapters/footage/pexels_adapter.py` — `PexelsAdapter(FootageProvider)` using `requests`; key from `Settings.get_key("pexels")`; `@retry`; returns `List[FootageClip]` ordered by relevance
+- [X] T026 [P] [US1] Implement `docu_studio/adapters/footage/pixabay_adapter.py` — `PixabayAdapter(FootageProvider)` using `requests`; key from `Settings.get_key("pixabay")`; `@retry`; returns `List[FootageClip]`
 
 **Pipeline stages** (each imports only ABCs, not concrete adapters):
 
-- [ ] T027 [US1] Implement `docu_studio/pipeline/stages/script_gen.py` — Stage 1: call `LLMProvider.generate_script(topic, target_words)`, push `ProgressEvent` and `LogEvent`, write `script.md` to project folder
-- [ ] T028 [US1] Implement `docu_studio/pipeline/stages/scene_break.py` — Stage 2: call `LLMProvider.break_into_scenes(script)`, construct `List[Scene]`, push progress, write `scenes.json`
-- [ ] T029 [US1] Implement `docu_studio/pipeline/stages/tts_gen.py` — Stage 3: iterate scenes sequentially, call `TTSProvider.synthesize()`, set `scene.audio_path` and `scene.audio_duration`, push per-scene progress
-- [ ] T030 [US1] Implement `docu_studio/pipeline/stages/keyword_extract.py` — Stage 4: per scene call `LLMProvider.extract_visual_keywords(title, narration)`, set `scene.visual_keywords`, push progress
-- [ ] T031 [US1] Implement `docu_studio/pipeline/stages/footage_assembly.py` — Stages 5+6: per scene search enabled `FootageProvider` list, accumulate clips, trim/concat/mux via `FFmpegWrapper`, set `scene.video_path` and `scene.video_duration`; if clips exhausted push `ErrorEvent(fatal=False)` and set `scene.footage_shortage=True`
-- [ ] T032 [US1] Implement `docu_studio/pipeline/stages/fcpxml_export.py` — Stage 7: collect `FinalScene` list, call `validate_sync()`, call `generate_fcpxml()`, write `timeline.fcpxml` to project folder, push completion events
-- [ ] T033 [US1] Implement `docu_studio/pipeline/runner.py` — `PipelineRunner(threading.Thread)`: runs stages 1–7 sequentially, checks `cancel_event` between stages and between scenes, pushes all events to `queue.Queue`, calls `save_run()` with final `RunStatus` on exit (completed/cancelled/failed)
+- [X] T027 [US1] Implement `docu_studio/pipeline/stages/script_gen.py` — Stage 1: call `LLMProvider.generate_script(topic, target_words)`, push `ProgressEvent` and `LogEvent`, write `script.md` to project folder
+- [X] T028 [US1] Implement `docu_studio/pipeline/stages/scene_break.py` — Stage 2: call `LLMProvider.break_into_scenes(script)`, construct `List[Scene]`, push progress, write `scenes.json`
+- [X] T029 [US1] Implement `docu_studio/pipeline/stages/tts_gen.py` — Stage 3: iterate scenes sequentially, call `TTSProvider.synthesize()`, set `scene.audio_path` and `scene.audio_duration`, push per-scene progress
+- [X] T030 [US1] Implement `docu_studio/pipeline/stages/keyword_extract.py` — Stage 4: per scene call `LLMProvider.extract_visual_keywords(title, narration)`, set `scene.visual_keywords`, push progress
+- [X] T031 [US1] Implement `docu_studio/pipeline/stages/footage_assembly.py` — Stages 5+6: per scene search enabled `FootageProvider` list, accumulate clips, trim/concat/mux via `FFmpegWrapper`, set `scene.video_path` and `scene.video_duration`; if clips exhausted push `ErrorEvent(fatal=False)` and set `scene.footage_shortage=True`
+- [X] T032 [US1] Implement `docu_studio/pipeline/stages/fcpxml_export.py` — Stage 7: collect `FinalScene` list, call `validate_sync()`, call `generate_fcpxml()`, write `timeline.fcpxml` to project folder, push completion events
+- [X] T033 [US1] Implement `docu_studio/pipeline/runner.py` — `PipelineRunner(threading.Thread)`: runs stages 1–7 sequentially, checks `cancel_event` between stages and between scenes, pushes all events to `queue.Queue`, calls `save_run()` with final `RunStatus` on exit (completed/cancelled/failed); for Guided Mode set `run.topic_source = 'user_supplied'` before Stage 1 (Full Auto mode sets it from `TopicResult` in T048)
 
 **GUI** (depends on T033 for runner interface):
 
-- [ ] T034 [US1] Implement `docu_studio/gui/app.py` — `DocsStudioApp(CTk)`: screen stack navigation (`show_screen()`), `after(100, _poll_queue)` queue drainer that dispatches events to the active screen, call `check_license()` at startup
-- [ ] T035 [US1] Implement `docu_studio/gui/screens/run_config_screen.py` — Guided Mode fields: topic entry, duration slider (5–120 min), Start Run button; wires to `PipelineRunner` and transitions to `ProgressScreen`
-- [ ] T036 [US1] Implement `docu_studio/gui/screens/progress_screen.py` — shows stage name, "Scene N of M", scrollable log widget, Cancel button that sets `cancel_event`; renders `ProgressEvent`, `LogEvent`, `ErrorEvent` from queue
-- [ ] T037 [US1] Implement `docu_studio/gui/screens/main_screen.py` — scrollable run history list (topic, date, status badge, Open Folder button per row); Start New Run button; loads `load_history()` at screen init
-- [ ] T038 [US1] Wire end-to-end: `DocsStudioApp` launches `PipelineRunner` from `RunConfigScreen.start_run()`, queue drains to `ProgressScreen`, on run end navigate to `MainScreen` and refresh history
+- [X] T034 [US1] Implement `docu_studio/gui/app.py` — `DocsStudioApp(CTk)`: screen stack navigation (`show_screen()`), `after(100, _poll_queue)` queue drainer that dispatches events to the active screen, call `check_license()` at startup
+- [X] T035 [US1] Implement `docu_studio/gui/screens/run_config_screen.py` — Guided Mode fields: topic entry, duration slider (5–120 min), Start Run button; wires to `PipelineRunner` and transitions to `ProgressScreen`
+- [X] T036 [US1] Implement `docu_studio/gui/screens/progress_screen.py` — shows stage name, "Scene N of M", scrollable log widget, Cancel button that sets `cancel_event`; renders `ProgressEvent`, `LogEvent`, `ErrorEvent` from queue
+- [X] T037 [US1] Implement `docu_studio/gui/screens/main_screen.py` — scrollable run history list (topic, date, status badge, Open Folder button per row); Start New Run button; loads `load_history()` at screen init; Open Folder button MUST call `platform_layer.open_folder(run.project_folder)` (defined in T006) — no `os.startfile`, `subprocess.call`, or other OS-specific calls in this file (Constitution VI)
+- [X] T038 [US1] Wire end-to-end: `DocsStudioApp` launches `PipelineRunner` from `RunConfigScreen.start_run()`, queue drains to `ProgressScreen`, on run end navigate to `MainScreen` and refresh history
 
 **Adapter integration tests** (all parallel; HTTP-mocked via `responses`):
 
-- [ ] T039 [P] [US1] Write integration test for `AnthropicAdapter` in `tests/integration/test_anthropic_adapter.py` — mock HTTP; assert `generate_script` returns str, `break_into_scenes` returns list of scene dicts, `extract_visual_keywords` returns list of strings
-- [ ] T040 [P] [US1] Write integration test for `EdgeTTSAdapter` in `tests/integration/test_edge_tts_adapter.py` — mock `edge_tts` library at boundary; assert `synthesize` writes file and returns duration float
-- [ ] T041 [P] [US1] Write integration test for `ElevenLabsAdapter` in `tests/integration/test_elevenlabs_adapter.py` — mock HTTP; assert `synthesize` calls API with key and returns duration
-- [ ] T042 [P] [US1] Write integration test for `PexelsAdapter` in `tests/integration/test_pexels_adapter.py` — mock HTTP; assert `search` returns `List[FootageClip]`; assert empty list on 404
-- [ ] T043 [P] [US1] Write integration test for `PixabayAdapter` in `tests/integration/test_pixabay_adapter.py` — mock HTTP; assert `search` returns `List[FootageClip]`; assert empty list on API error
+- [X] T039 [P] [US1] Write integration test for `AnthropicAdapter` in `tests/integration/test_anthropic_adapter.py` — mock HTTP; assert `generate_script` returns str, `break_into_scenes` returns list of scene dicts, `extract_visual_keywords` returns list of strings
+- [X] T040 [P] [US1] Write integration test for `EdgeTTSAdapter` in `tests/integration/test_edge_tts_adapter.py` — mock `edge_tts` library at boundary; assert `synthesize` writes file and returns duration float
+- [X] T041 [P] [US1] Write integration test for `ElevenLabsAdapter` in `tests/integration/test_elevenlabs_adapter.py` — mock HTTP; assert `synthesize` calls API with key and returns duration
+- [X] T042 [P] [US1] Write integration test for `PexelsAdapter` in `tests/integration/test_pexels_adapter.py` — mock HTTP; assert `search` returns `List[FootageClip]`; assert empty list on 404
+- [X] T043 [P] [US1] Write integration test for `PixabayAdapter` in `tests/integration/test_pixabay_adapter.py` — mock HTTP; assert `search` returns `List[FootageClip]`; assert empty list on API error
 
 **Checkpoint**: Guided Mode end-to-end run is fully functional and independently testable.
 
@@ -118,6 +120,8 @@
 **Independent Test**: Select Full Auto Mode, enter 20 minutes, start run. Verify run log shows either `"topic_source": "web_search"` or `"topic_source": "ai_suggested"` plus `"fallback_triggered": true/false`. Verify GUI labels the source before the pipeline proceeds.
 
 ### Implementation for User Story 2
+
+> **Note (ordering)**: plan.md Phase 1 lists `TopicDiscoveryProvider` ABC alongside the other provider interfaces. In tasks.md it is deferred here (Phase 4/US2) because it has no consumers until US2; implementing it earlier would leave it untestable. Developers following plan.md should treat the topic-discovery interface as a Phase 4 deliverable per this task list.
 
 - [ ] T044 [US2] Implement `docu_studio/adapters/topic_discovery/base.py` — `TopicDiscoveryProvider` ABC with `discover_topic(llm_fallback: LLMProvider) -> TopicResult`; define `TopicResult` frozen dataclass (`topic`, `source`, `fallback_triggered`)
 - [ ] T045 [US2] Implement `docu_studio/adapters/topic_discovery/serper_adapter.py` — `SerperAdapter(TopicDiscoveryProvider)`: call Serper.dev API with `@retry`; on failure or empty result call `llm_fallback.suggest_topic()` and set `fallback_triggered=True`; key from `Settings.get_key("serper")`
@@ -160,9 +164,9 @@
 
 ### Implementation for User Story 4
 
-- [ ] T053 [US4] Implement `docu_studio/gui/screens/settings_screen.py` — sections: API Keys (masked entry fields per provider, show/hide toggle), TTS Provider (radio: Edge-TTS / ElevenLabs), Footage Providers (checkboxes: Pexels, Pixabay), Output Folder (path entry + Browse button via `tkinter.filedialog`), WPM (slider 80–250), Save button
-- [ ] T054 [US4] Wire Settings screen save action: call `Settings.set_key(provider, value)` for each key field that changed, then `Settings.save()` for non-secret fields; reload `Settings` from disk on next app start to verify persistence
-- [ ] T055 [US4] Add Settings button to `docu_studio/gui/screens/main_screen.py` and wire it to navigate to `SettingsScreen`; on first launch with no keys configured, open Settings automatically
+- [X] T053 [US4] Implement `docu_studio/gui/screens/settings_screen.py` — sections: API Keys (masked entry fields per provider, show/hide toggle), TTS Provider (radio: Edge-TTS / ElevenLabs), Footage Providers (checkboxes: Pexels, Pixabay), Output Folder (path entry + Browse button via `tkinter.filedialog`), WPM (slider 80–250), Save button
+- [X] T054 [US4] Wire Settings screen save action: call `Settings.set_key(provider, value)` for each key field that changed, then `Settings.save()` for non-secret fields; reload `Settings` from disk on next app start to verify persistence
+- [X] T055 [US4] Add Settings button to `docu_studio/gui/screens/main_screen.py` and wire it to navigate to `SettingsScreen`; on first launch with no keys configured, open Settings automatically
 
 **Checkpoint**: All Settings configurable and persisted; API keys never appear in plaintext files or logs.
 
@@ -172,11 +176,12 @@
 
 **Purpose**: Cross-cutting quality checks, build specs, and coverage validation.
 
-- [ ] T056 [P] Create `build/windows/docu_studio.spec` — PyInstaller one-file `.exe` spec: `datas` for imageio-ffmpeg binary, `--noconsole`, hiddenimports for keyring backends and customtkinter
-- [ ] T057 [P] Create `build/macos/docu_studio.spec` — PyInstaller `.app` bundle spec: `datas` for imageio-ffmpeg binary, `--windowed`, correct macOS bundle metadata (CFBundleName, CFBundleIdentifier)
-- [ ] T058 Run full test suite and verify 80%+ coverage: `pytest --cov=docu_studio --cov-report=term-missing`; identify and fill any gaps below threshold
-- [ ] T059 [P] Verify no API key leaks: grep `LogEvent.message` construction sites across all adapters to confirm no key interpolation; check `pipeline_log.txt` output path is sanitized
-- [ ] T060 [P] Validate `quickstart.md` dev-setup instructions on a clean virtualenv: follow steps end-to-end and confirm all commands succeed
+- [X] T056 [P] Create `build/windows/docu_studio.spec` — PyInstaller one-file `.exe` spec: `datas` for imageio-ffmpeg binary, `--noconsole`, hiddenimports for keyring backends and customtkinter
+- [X] T057 [P] Create `build/macos/docu_studio.spec` — PyInstaller `.app` bundle spec: `datas` for imageio-ffmpeg binary, `--windowed`, correct macOS bundle metadata (CFBundleName, CFBundleIdentifier)
+- [X] T058 Run full test suite and verify 80%+ coverage: `pytest --cov=docu_studio --cov-report=term-missing`; identify and fill any gaps below threshold
+- [X] T059 [P] Verify no API key leaks: grep `LogEvent.message` construction sites across all adapters to confirm no key interpolation; check `pipeline_log.txt` output path is sanitized
+- [X] T060 [P] Validate `quickstart.md` dev-setup instructions on a clean virtualenv: follow steps end-to-end and confirm all commands succeed
+- [X] T061 Implement FR-018 `pipeline_log.txt` write path: add `_TeeQueue(queue.Queue)` to `runner.py` that opens `project_folder/pipeline_log.txt` after `create_project_folder()`, tees every `LogEvent`/`ProgressEvent`/`ErrorEvent` through `sanitize_log_message()` before disk write, and closes/flushes in the `finally` block (including on failure); wire `sensitive_keys` param on `PipelineRunner.__init__`; add 6 integration tests in `tests/integration/test_pipeline_log.py`
 
 ---
 

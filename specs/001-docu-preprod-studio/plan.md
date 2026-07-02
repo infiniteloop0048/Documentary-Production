@@ -99,7 +99,7 @@ for technology decisions and [data-model.md](data-model.md) for entity definitio
 ### VI. Cross-Platform Parity ✅
 
 - `platform_layer.py` is the single location of all `platform.system()` branches
-- Provides: `config_dir()`, `ffmpeg_exe()`, `ffprobe_exe()`
+- Provides: `config_dir()`, `ffmpeg_exe()`, `ffprobe_exe()`, `open_folder(path)`
 - `imageio-ffmpeg` resolves the correct bundled binary per OS automatically
 - `keyring` selects the correct backend (Windows Credential Manager / macOS Keychain) per OS automatically
 - CustomTkinter renders natively on both platforms; look-and-feel differences are acceptable (Assumption in spec)
@@ -141,7 +141,7 @@ specs/001-docu-preprod-studio/
 docu_studio/                         # Python package
 ├── __main__.py                      # Entry point; check_license(); launch GUI
 ├── licensing.py                     # check_license() → True  [Phase 2 stub]
-├── platform_layer.py                # config_dir(), ffmpeg_exe(), ffprobe_exe()
+├── platform_layer.py                # config_dir(), ffmpeg_exe(), ffprobe_exe(), open_folder()
 ├── retry.py                         # @retry(max_attempts, backoff_factor) decorator
 ├── config/
 │   ├── settings.py                  # Settings dataclass; load/save JSON + keyring
@@ -238,8 +238,8 @@ defined in the constitution (Adapter, Settings, Platform, Export Gate).
 |------|---------|-------|
 | LLM interface | `adapters/llm/base.py` | `generate_script`, `break_into_scenes`, `extract_visual_keywords`, `suggest_topic` |
 | Anthropic adapter | `adapters/llm/anthropic_adapter.py` | `@retry` on every API call; structured output via Claude |
-| Topic discovery interface | `adapters/topic_discovery/base.py` | Returns `TopicResult(topic, source, fallback_triggered)` |
-| Serper adapter | `adapters/topic_discovery/serper_adapter.py` | Calls Serper.dev; on failure delegates to `LLMProvider.suggest_topic()` |
+| Topic discovery interface | `adapters/topic_discovery/base.py` | Returns `TopicResult(topic, source, fallback_triggered)` — **deferred to tasks.md Phase 4 (T044)**: no consumer exists until US2; listed here for interface completeness |
+| Serper adapter | `adapters/topic_discovery/serper_adapter.py` | Calls Serper.dev; on failure delegates to `LLMProvider.suggest_topic()` — **deferred to tasks.md Phase 4 (T045)** |
 | TTS interface | `adapters/tts/base.py` | `synthesize(text, output_path) -> float` (returns duration seconds) |
 | Edge-TTS adapter | `adapters/tts/edge_tts_adapter.py` | `asyncio.run()` wraps async edge-tts call; no API key |
 | ElevenLabs adapter | `adapters/tts/elevenlabs_adapter.py` | Key from keyring; `@retry` on API call |
@@ -299,6 +299,7 @@ defined in the constitution (Adapter, Settings, Platform, Export Gate).
 | ElevenLabs adapter tests | `tests/integration/test_elevenlabs_adapter.py` |
 | Pexels adapter tests | `tests/integration/test_pexels_adapter.py` |
 | Pixabay adapter tests | `tests/integration/test_pixabay_adapter.py` |
+| Output folder error test | `tests/integration/test_project_folder.py` |
 
 ### Phase 6: Packaging
 

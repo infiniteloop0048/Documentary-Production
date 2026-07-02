@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Docu Studio</title>
+  <script src="tailwind.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter','system-ui','-apple-system','Segoe UI','Helvetica Neue','sans-serif'] },
+          colors: {
+            app:    '#111318',
+            panel:  '#1c1e24',
+            card:   '#24272e',
+            input:  '#2e313a',
+            hover:  '#383b45',
+            border: '#383b45',
+            bstrong:'#52566a',
+            dim:    '#b0b8d0',
+            faint:  '#7a8099',
+            accent: '#38bdf8',
+            adark:  '#0284c7',
+            atint:  '#0c2d42',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { margin: 0; height: 100vh; overflow: hidden; background: #111318; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #1c1e24; }
+    ::-webkit-scrollbar-thumb { background: #383b45; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #52566a; }
+  </style>
+</head>
+<body class="bg-app text-white font-sans">
+<div style="position:fixed;top:0;right:0;background:red;color:white;z-index:9999;padding:4px">v4</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SCREEN 1: MAIN
+═══════════════════════════════════════════════════════════════ -->
+<div data-screen="main" class="h-screen flex flex-col">
+  <!-- Top bar -->
+  <div class="h-14 bg-panel border-b border-border px-6 flex items-center justify-between shrink-0">
+    <div class="flex items-center">
+      <span class="font-semibold text-xl text-white">Docu Studio</span>
+      <span class="text-xs text-faint bg-hover px-2 py-0.5 rounded ml-2">v1.0</span>
+    </div>
+    <button onclick="showScreen('settings')" class="p-2 rounded-lg bg-card border border-border text-dim hover:text-white hover:border-bstrong transition-colors" title="Settings">
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+    </button>
+  </div>
+  <!-- Content -->
+  <div class="flex-1 overflow-y-auto bg-app">
+    <div class="max-w-4xl mx-auto pt-16 pb-12 px-6">
+      <!-- Hero -->
+      <h1 class="text-4xl font-bold text-white leading-tight">Automate your documentary pre-production</h1>
+      <p class="text-lg text-dim mt-3">Generate scripts, voiceovers, and stock footage timelines — ready for your editor.</p>
+
+      <!-- Mode cards -->
+      <div class="mt-12 grid grid-cols-2 gap-6">
+        <!-- Guided -->
+        <div onclick="startConfig('guided')" class="bg-card border border-border rounded-xl p-8 hover:border-accent transition-colors cursor-pointer">
+          <div class="text-xs font-semibold tracking-widest text-accent">GUIDED MODE</div>
+          <div class="text-xl font-semibold text-white mt-2">You choose the topic</div>
+          <p class="text-sm text-dim mt-3 leading-relaxed">Enter your documentary topic and target duration. The app writes the script, records voiceover, sources footage, and exports a Filmora timeline.</p>
+          <button class="mt-6 bg-accent text-app font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-adark transition-colors pointer-events-none">Start guided run →</button>
+        </div>
+        <!-- Full Auto -->
+        <div onclick="startConfig('auto')" class="bg-card border border-border rounded-xl p-8 hover:border-purple-400 transition-colors cursor-pointer">
+          <div class="text-xs font-semibold tracking-widest text-purple-400">FULL AUTO MODE</div>
+          <div class="text-xl font-semibold text-white mt-2">AI finds a trending topic</div>
+          <p class="text-sm text-dim mt-3 leading-relaxed">No input needed. The app searches for trending documentary subjects, picks the best one, and runs the entire pipeline automatically.</p>
+          <button class="mt-6 bg-purple-500 text-white font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-purple-600 transition-colors pointer-events-none">Start auto run →</button>
+        </div>
+      </div>
+
+      <!-- Recent runs -->
+      <div class="mt-16">
+        <div class="text-sm font-semibold text-dim uppercase tracking-wider">Recent runs</div>
+        <div id="history-empty" class="mt-4 text-center py-12 text-faint text-sm">No runs yet. Start your first documentary above.</div>
+        <div id="history-list" class="mt-4" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SCREEN 2: CONFIG
+═══════════════════════════════════════════════════════════════ -->
+<div data-screen="config" class="h-screen flex flex-col" style="display:none">
+  <!-- Top bar -->
+  <div class="h-14 bg-panel border-b border-border px-6 flex items-center shrink-0">
+    <button onclick="showScreen('main')" class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-[#24272e] text-[#8b95b0] border border-[#52566a] hover:text-white hover:border-[#8b95b0] transition-colors cursor-pointer">← Back</button>
+    <span class="font-semibold text-white ml-4">Configure run</span>
+  </div>
+  <!-- Content -->
+  <div class="flex-1 overflow-y-auto bg-app">
+    <div class="max-w-lg mx-auto pt-16 px-6">
+      <span id="config-mode-badge" class="text-xs font-semibold px-3 py-1 rounded-full bg-atint text-accent">Guided Mode</span>
+
+      <div class="mt-8 bg-card border border-border rounded-xl p-8">
+        <!-- Topic row -->
+        <div id="topic-row">
+          <label class="text-sm font-medium text-dim block">Documentary topic</label>
+          <input id="topic-input" type="text"
+            placeholder="e.g. The Deep Ocean, Climate Change, Ancient Rome"
+            class="mt-2 w-full bg-input border border-border rounded-lg px-4 py-3 text-white text-sm focus:border-accent focus:outline-none placeholder-faint">
+        </div>
+
+        <!-- Duration -->
+        <div class="mt-6">
+          <label class="text-sm font-medium text-dim block">Target duration</label>
+          <div class="mt-2 flex items-center">
+            <input id="duration-input" type="number" min="1" max="120" value="5"
+              class="w-28 bg-input border border-border rounded-lg px-4 py-3 text-white text-sm text-center focus:border-accent focus:outline-none">
+            <span class="text-sm text-dim ml-3">minutes</span>
+          </div>
+          <div id="duration-hint" class="mt-3 text-xs text-faint">A 5-minute documentary ≈ 750 words of narration</div>
+        </div>
+
+        <!-- Start button -->
+        <button id="start-run-btn" onclick="startRun()"
+          class="mt-8 bg-accent text-app font-bold text-base px-8 py-3.5 rounded-xl w-full hover:bg-adark transition-colors">
+          Generate documentary →
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SCREEN 3: PROGRESS
+═══════════════════════════════════════════════════════════════ -->
+<div data-screen="progress" class="h-screen flex flex-col" style="display:none">
+  <!-- Top bar -->
+  <div class="h-14 bg-panel border-b border-border px-6 flex items-center shrink-0">
+    <button id="cancel-btn" class="text-sm text-dim hover:text-red-400 transition-colors px-3 py-1.5 rounded-lg hover:bg-hover">✕ Cancel</button>
+    <button id="back-btn" onclick="showScreen('main')" class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-[#24272e] text-[#8b95b0] border border-[#52566a] hover:text-white hover:border-[#8b95b0] transition-colors cursor-pointer" style="display:none">← Back</button>
+    <span id="progress-title" class="font-semibold text-white ml-4">Generating…</span>
+  </div>
+  <!-- Content -->
+  <div class="flex-1 overflow-y-auto bg-app">
+    <div class="max-w-3xl mx-auto pt-10 px-6">
+      <!-- Stage tracker -->
+      <div class="flex flex-wrap gap-2" id="stage-track">
+        <div id="stage-0" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Script</div>
+        <div id="stage-1" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Scenes</div>
+        <div id="stage-2" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Audio</div>
+        <div id="stage-3" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Keywords</div>
+        <div id="stage-4" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Footage</div>
+        <div id="stage-5" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Sync</div>
+        <div id="stage-6" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Timeline</div>
+        <div id="stage-7" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Done</div>
+      </div>
+
+      <!-- Log -->
+      <div class="mt-8">
+        <div class="text-xs font-semibold text-faint uppercase tracking-wider">Pipeline log</div>
+        <div id="log-area" class="mt-2 bg-panel border border-border rounded-xl p-5 h-80 overflow-y-auto font-mono text-sm space-y-1"></div>
+        <button id="copy-log-btn" onclick="(function(btn){const text=[...document.getElementById('log-area').querySelectorAll('*')].map(el=>el.textContent).join('\n').trim();const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);btn.textContent='Copied!';setTimeout(function(){btn.textContent='Copy Log'},1500);})(this)"
+          class="mt-2 px-4 py-1.5 rounded-lg text-xs font-semibold bg-card border border-border text-dim hover:text-white hover:border-bstrong transition-colors">
+          Copy Log
+        </button>
+      </div>
+
+      <!-- Open folder button -->
+      <button id="open-folder-btn" class="mt-6 bg-green-500 text-white font-semibold px-6 py-3 rounded-xl hover:bg-green-600 transition-colors" style="display:none">
+        ✓ Open output folder
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SCREEN 4: SETTINGS
+═══════════════════════════════════════════════════════════════ -->
+<div data-screen="settings" class="h-screen flex flex-col" style="display:none">
+  <!-- Top bar -->
+  <div class="h-14 bg-panel border-b border-border px-6 flex items-center shrink-0">
+    <button onclick="showScreen('main')" class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-[#24272e] text-[#8b95b0] border border-[#52566a] hover:text-white hover:border-[#8b95b0] transition-colors cursor-pointer">← Back</button>
+    <span class="font-semibold text-white ml-4">Settings</span>
+  </div>
+  <!-- Content -->
+  <div class="flex-1 overflow-y-auto bg-app">
+    <div class="max-w-2xl mx-auto pt-8 pb-32 px-6">
+
+      <!-- CARD 1: Language Model -->
+      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+        <div class="h-0.5 w-full bg-accent"></div>
+        <div class="px-6 py-4 border-b border-border">
+          <span class="font-semibold text-white text-sm">Language Model</span>
+        </div>
+        <div class="px-6 py-5 space-y-5">
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">Provider</label>
+            <select id="llm-provider" class="w-full bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm focus:border-accent focus:outline-none appearance-none cursor-pointer">
+              <option>Anthropic</option>
+              <option>OpenAI</option>
+              <option>OpenRouter</option>
+              <option>Groq</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">Model</label>
+            <select id="llm-model" class="w-full bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm focus:border-accent focus:outline-none appearance-none cursor-pointer"></select>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">Custom model name (overrides dropdown)</label>
+            <input type="text" id="custom-model-input"
+              placeholder="e.g. gpt-4o-2024-08-06"
+              class="w-full bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm focus:border-accent focus:outline-none placeholder-faint">
+          </div>
+          <!-- API key rows -->
+          <div id="key-row-anthropic">
+            <label class="text-sm font-medium text-dim block mb-2">Anthropic API Key</label>
+            <div class="flex gap-2">
+              <input type="password" id="anthropic-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+              <button onclick="toggleReveal('anthropic-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+            </div>
+          </div>
+          <div id="key-row-openai" style="display:none">
+            <label class="text-sm font-medium text-dim block mb-2">OpenAI API Key</label>
+            <div class="flex gap-2">
+              <input type="password" id="openai-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+              <button onclick="toggleReveal('openai-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+            </div>
+          </div>
+          <div id="key-row-openrouter" style="display:none">
+            <label class="text-sm font-medium text-dim block mb-2">OpenRouter API Key</label>
+            <div class="flex gap-2">
+              <input type="password" id="openrouter-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+              <button onclick="toggleReveal('openrouter-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+            </div>
+          </div>
+          <div id="key-row-groq" style="display:none">
+            <label class="text-sm font-medium text-dim block mb-2">Groq API Key</label>
+            <div class="flex gap-2">
+              <input type="password" id="groq-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+              <button onclick="toggleReveal('groq-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 2: Voice Synthesis -->
+      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+        <div class="h-0.5 w-full bg-purple-500"></div>
+        <div class="px-6 py-4 border-b border-border">
+          <span class="font-semibold text-white text-sm">Voice Synthesis</span>
+        </div>
+        <div class="px-6 py-5 space-y-5">
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">Provider</label>
+            <select id="tts-provider" onchange="onTtsChange(this.value)" class="w-full bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm focus:border-accent focus:outline-none appearance-none cursor-pointer">
+              <option value="gtts">gTTS (Free)</option>
+              <option value="elevenlabs">ElevenLabs</option>
+              <option value="deepgram">Deepgram</option>
+            </select>
+          </div>
+          <div id="tts-key-row">
+            <label id="tts-key-label" class="text-sm font-medium text-dim block mb-2">ElevenLabs API Key</label>
+            <div class="flex gap-2">
+              <input type="password" id="tts-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+              <button onclick="toggleReveal('tts-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+            </div>
+          </div>
+          <div id="dg-voice-row" style="display:none">
+            <label class="text-sm font-medium text-dim block mb-2">Voice model</label>
+            <select id="dg-voice" class="w-full bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm focus:border-accent focus:outline-none appearance-none cursor-pointer">
+              <option value="aura-asteria-en">aura-asteria-en</option>
+              <option value="aura-luna-en">aura-luna-en</option>
+              <option value="aura-stella-en">aura-stella-en</option>
+              <option value="aura-athena-en">aura-athena-en</option>
+              <option value="aura-hera-en">aura-hera-en</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 3: Stock Footage -->
+      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+        <div class="h-0.5 w-full bg-green-500"></div>
+        <div class="px-6 py-4 border-b border-border">
+          <span class="font-semibold text-white text-sm">Stock Footage</span>
+        </div>
+        <div class="px-6 py-5">
+          <!-- Primary -->
+          <div>
+            <label class="block text-sm font-medium text-[#b0b8d0]">Primary source</label>
+            <select id="footage-primary" onchange="onFootageChange('primary')"
+              class="bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
+                     text-white text-sm focus:border-sky-400 focus:outline-none
+                     cursor-pointer w-48 mt-1">
+              <option value="pexels">Pexels</option>
+              <option value="pixabay">Pixabay</option>
+              <option value="coverr">Coverr</option>
+            </select>
+            <div id="footage-primary-key-row" class="mt-3">
+              <label id="footage-primary-key-label"
+                class="block text-sm font-medium text-[#b0b8d0]">Pexels API Key</label>
+              <div class="flex gap-2 mt-1">
+                <input type="password" id="footage-primary-key"
+                  class="flex-1 bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
+                         text-white text-sm font-mono focus:border-sky-400 focus:outline-none">
+                <button onclick="toggleReveal('footage-primary-key', this)"
+                  class="px-4 py-2.5 bg-[#383b45] border border-[#383b45] rounded-lg
+                         text-[#b0b8d0] text-sm hover:text-white transition-colors cursor-pointer">
+                  Reveal</button>
+              </div>
+            </div>
+          </div>
+          <!-- Divider -->
+          <div class="border-t border-[#2e313a] my-5"></div>
+          <!-- Fallback -->
+          <div>
+            <label class="block text-sm font-medium text-[#b0b8d0]">Fallback source</label>
+            <select id="footage-fallback" onchange="onFootageChange('fallback')"
+              class="bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
+                     text-white text-sm focus:border-sky-400 focus:outline-none
+                     cursor-pointer w-48 mt-1">
+              <option value="pixabay">Pixabay</option>
+              <option value="pexels">Pexels</option>
+              <option value="coverr">Coverr</option>
+              <option value="none">None (disabled)</option>
+            </select>
+            <div id="footage-fallback-key-row" class="mt-3">
+              <label id="footage-fallback-key-label"
+                class="block text-sm font-medium text-[#b0b8d0]">Pixabay API Key</label>
+              <div class="flex gap-2 mt-1">
+                <input type="password" id="footage-fallback-key"
+                  class="flex-1 bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
+                         text-white text-sm font-mono focus:border-sky-400 focus:outline-none">
+                <button onclick="toggleReveal('footage-fallback-key', this)"
+                  class="px-4 py-2.5 bg-[#383b45] border border-[#383b45] rounded-lg
+                         text-[#b0b8d0] text-sm hover:text-white transition-colors cursor-pointer">
+                  Reveal</button>
+              </div>
+            </div>
+            <p class="text-xs text-[#7a8099] mt-2">
+              Used automatically if primary source returns no results.
+            </p>
+          </div>
+          <!-- Divider -->
+          <div class="border-t border-[#2e313a] my-5"></div>
+          <!-- Second fallback -->
+          <div>
+            <label class="block text-sm font-medium text-[#b0b8d0]">Second fallback source</label>
+            <select id="footage-fallback2" onchange="onFootageChange('fallback2')"
+              class="bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
+                     text-white text-sm focus:border-sky-400 focus:outline-none
+                     cursor-pointer w-48 mt-1">
+              <option value="none" selected>None (disabled)</option>
+              <option value="pexels">Pexels</option>
+              <option value="pixabay">Pixabay</option>
+              <option value="coverr">Coverr</option>
+            </select>
+            <div id="footage-fallback2-key-row" class="mt-3" style="display:none">
+              <label id="footage-fallback2-key-label"
+                class="block text-sm font-medium text-[#b0b8d0]">API Key</label>
+              <div class="flex gap-2 mt-1">
+                <input type="password" id="footage-fallback2-key"
+                  class="flex-1 bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
+                         text-white text-sm font-mono focus:border-sky-400 focus:outline-none">
+                <button onclick="toggleReveal('footage-fallback2-key', this)"
+                  class="px-4 py-2.5 bg-[#383b45] border border-[#383b45] rounded-lg
+                         text-[#b0b8d0] text-sm hover:text-white transition-colors cursor-pointer">
+                  Reveal</button>
+              </div>
+            </div>
+            <p class="text-xs text-[#7a8099] mt-2">
+              Used if both primary and first fallback return no results.
+            </p>
+          </div>
+          <!-- Coverr key (shown when Coverr is selected as primary, fallback, or second fallback) -->
+          <div id="coverr-key-row" class="mt-4" style="display:none">
+            <label class="block text-sm font-medium text-[#b0b8d0]">Coverr API Key</label>
+            <div class="flex gap-2 mt-1">
+              <input type="password" id="coverr-key-input"
+                class="flex-1 bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
+                       text-white text-sm font-mono focus:border-sky-400 focus:outline-none">
+              <button onclick="toggleReveal('coverr-key-input', this)"
+                class="px-4 py-2.5 bg-[#383b45] border border-[#383b45] rounded-lg
+                       text-[#b0b8d0] text-sm hover:text-white transition-colors cursor-pointer">
+                Reveal</button>
+            </div>
+          </div>
+          <!-- Divider -->
+          <div class="border-t border-[#2e313a] my-5"></div>
+          <!-- Shortage strategy -->
+          <div>
+            <label class="block text-sm font-medium text-[#b0b8d0]">If footage runs short:</label>
+            <select id="footage-shortage-select"
+              class="bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
+                     text-white text-sm focus:border-sky-400 focus:outline-none
+                     cursor-pointer w-48 mt-1">
+              <option value="loop">Loop existing clips</option>
+              <option value="fetch">Fetch more clips</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 4: Topic Discovery -->
+      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+        <div class="h-0.5 w-full bg-orange-500"></div>
+        <div class="px-6 py-4 border-b border-border">
+          <span class="font-semibold text-white text-sm">Topic Discovery</span>
+        </div>
+        <div class="px-6 py-5">
+          <label class="text-sm font-medium text-dim block mb-2">Serper.dev API Key</label>
+          <div class="flex gap-2">
+            <input type="password" id="serper-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+            <button onclick="toggleReveal('serper-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 5: Output & Narration -->
+      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+        <div class="h-0.5 w-full bg-bstrong"></div>
+        <div class="px-6 py-4 border-b border-border">
+          <span class="font-semibold text-white text-sm">Output & Narration</span>
+        </div>
+        <div class="px-6 py-5 space-y-5">
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">Output folder</label>
+            <div class="flex gap-2">
+              <input type="text" id="output-folder" readonly class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm focus:outline-none">
+              <button onclick="browseFolder()" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Browse…</button>
+            </div>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">Narration pace</label>
+            <div class="flex items-center gap-4">
+              <input type="range" id="wpm-slider" min="80" max="220" step="1" value="150"
+                class="flex-1 accent-accent">
+              <span id="wpm-label" class="text-sm font-semibold text-accent w-20">150 WPM</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  <!-- Settings footer -->
+  <div class="shrink-0 bg-panel border-t border-border px-6 py-4 flex justify-end gap-3">
+    <button onclick="showScreen('main')" class="px-6 py-2.5 rounded-lg text-sm font-semibold bg-[#24272e] text-[#8b95b0] border border-[#52566a] hover:text-white hover:border-[#8b95b0] transition-colors cursor-pointer">Cancel</button>
+    <button id="save-btn" onclick="saveSettings()" class="bg-accent text-app font-semibold px-6 py-2.5 rounded-lg hover:bg-adark transition-colors text-sm">Save settings</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
