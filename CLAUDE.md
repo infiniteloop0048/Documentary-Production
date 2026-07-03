@@ -1,17 +1,22 @@
-<!-- SPECKIT START -->
-Active feature: **Documentary Pre-Production Studio** (`001-docu-preprod-studio`)
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-Key files:
-- Plan: `specs/001-docu-preprod-studio/plan.md`
-- Spec: `specs/001-docu-preprod-studio/spec.md`
-- Research: `specs/001-docu-preprod-studio/research.md`
-- Data model: `specs/001-docu-preprod-studio/data-model.md`
-- Provider contracts: `specs/001-docu-preprod-studio/contracts/provider-interfaces.md`
-- Dev setup: `specs/001-docu-preprod-studio/quickstart.md`
+---
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+---
 
-Stack: Python 3.11+, CustomTkinter, PyInstaller, Anthropic SDK, edge-tts, ElevenLabs,
-Pexels API, Pixabay API, imageio-ffmpeg, keyring, requests.
+## Project: Documentary Pre-Production Studio
 
-Source package: `docu_studio/` (see plan.md for full directory tree).
+Source package: `docu_studio/` — entry point `docu_studio/__main__.py` →
+`docu_studio/gui/webview_app.py`.
+Stack: Python 3.11+, pywebview (Qt5/QtWebEngine backend), PyInstaller,
+Anthropic/OpenAI/OpenRouter/Groq SDKs, gTTS (default TTS)/ElevenLabs/
+Deepgram, Pexels/Pixabay/Coverr APIs, imageio-ffmpeg, keyring, requests.
 Tests: `tests/unit/` (no network) + `tests/integration/` (HTTP-mocked).
-<!-- SPECKIT END -->
+Run command: `DISPLAY=:1 .venv/bin/python -m docu_studio`
+Correct venv: `.venv/` — never `venv/`.
+Do not touch `pipeline/`, `runner/`, `adapters/` (except adding new ones),
+`history/`, `licensing.py`, or test files unless specifically fixing a bug
+in them.
+The old CustomTkinter GUI files (`gui/app.py`, `gui/screens/`,
+`gui/widgets/`, `gui/theme.py`, `gui/tokens.py`) are dead code — do not
+modify or reference them.
