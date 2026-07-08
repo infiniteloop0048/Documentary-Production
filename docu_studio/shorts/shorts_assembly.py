@@ -141,15 +141,24 @@ def assemble_short(
     for seg in segments:
         clip = clips[seg.clip_index]
         raw_duration = ffmpeg.get_duration(clip["path"])
-        window = max(2.0, min(4.0, seg.duration))
+        window = min(seg.duration, raw_duration)
         start, method = ffmpeg.detect_motion_window(clip["path"], raw_duration, window)
         _log.info(
             "Segment %d: clip=%s window_method=%s start=%.2f",
             seg.index, clip["path"], method, start,
         )
 
+        trim_duration = min(seg.duration, max(0.0, raw_duration - start))
+        if trim_duration < seg.duration:
+            _log.warning(
+                "Segment %d: clip %s only has %.2fs remaining from start=%.2f, "
+                "needed %.2fs (shortfall %.2fs)",
+                seg.index, clip["path"], trim_duration, start, seg.duration,
+                seg.duration - trim_duration,
+            )
+
         windowed = str(scene_dir / f"seg_{seg.index:03d}_window.mp4")
-        ffmpeg.trim_clip(clip["path"], start, seg.duration, windowed)
+        ffmpeg.trim_clip(clip["path"], start, trim_duration, windowed)
 
         strategy = choose_crop_strategy(clip["width"], clip["height"])
         vertical = str(scene_dir / f"seg_{seg.index:03d}_vertical.mp4")
@@ -159,7 +168,7 @@ def assemble_short(
         direction = "in" if seg.index % 2 == 0 else "out"
         pan = seg.index % 3 == 0
         kenburns = str(scene_dir / f"seg_{seg.index:03d}_kb.mp4")
-        ffmpeg.apply_ken_burns(vertical, kenburns, seg.duration, direction, pan)
+        ffmpeg.apply_ken_burns(vertical, kenburns, trim_duration, direction, pan)
 
         segment_paths.append(kenburns)
 
