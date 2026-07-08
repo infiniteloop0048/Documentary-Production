@@ -2,7 +2,14 @@
 sentence splitting."""
 from __future__ import annotations
 
-from docu_studio.shorts.shorts_script_gen import split_sentences, target_word_count
+from unittest.mock import MagicMock
+
+from docu_studio.shorts.shorts_script_gen import (
+    ShortsScript,
+    generate_shorts_script,
+    split_sentences,
+    target_word_count,
+)
 
 
 class TestTargetWordCount:
@@ -38,3 +45,61 @@ class TestSplitSentences:
 
     def test_single_sentence_no_trailing_punctuation(self) -> None:
         assert split_sentences("just one clause") == ["just one clause"]
+
+
+class TestGenerateShortsScript:
+    def test_happy_path_returns_aligned_queries(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger. Loop back now."
+        llm.break_into_scenes.return_value = [
+            {"title": "aerial city night", "narration": "Fact one is huge."},
+            {"title": "close-up hands typing", "narration": "Fact two is bigger."},
+            {"title": "sunrise timelapse", "narration": "Loop back now."},
+        ]
+
+        result = generate_shorts_script("Cities at night", 30, llm)
+
+        assert isinstance(result, ShortsScript)
+        assert result.sentences == [
+            "Fact one is huge.", "Fact two is bigger.", "Loop back now.",
+        ]
+        assert result.visual_queries == [
+            "aerial city night", "close-up hands typing", "sunrise timelapse",
+        ]
+        assert len(result.visual_queries) == len(result.sentences)
+
+    def test_malformed_json_response_retries_once_then_falls_back_to_topic(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "One sentence. Two sentence."
+        # First call: wrong count (parse/shape mismatch). Second call: still wrong.
+        llm.break_into_scenes.side_effect = [
+            [{"title": "only one", "narration": "One sentence."}],  # count mismatch
+            RuntimeError("model returned invalid JSON"),             # exception
+        ]
+
+        result = generate_shorts_script("Space facts", 30, llm)
+
+        assert result.sentences == ["One sentence.", "Two sentence."]
+        assert result.visual_queries == ["Space facts", "Space facts"]
+        assert llm.break_into_scenes.call_count == 2
+
+    def test_uses_generate_script_with_target_word_count(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Just one sentence here."
+        llm.break_into_scenes.return_value = [
+            {"title": "topic shot", "narration": "Just one sentence here."},
+        ]
+
+        generate_shorts_script("Ocean depths", 15, llm)
+
+        args, kwargs = llm.generate_script.call_args
+        # target_words is the 2nd positional/keyword arg to generate_script
+        assert kwargs.get("target_words", args[1] if len(args) > 1 else None) == round(15 / 60 * 170)
+
+    def test_empty_script_returns_no_sentences_no_queries(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = ""
+        result = generate_shorts_script("Nothing", 30, llm)
+        assert result.sentences == []
+        assert result.visual_queries == []
+        llm.break_into_scenes.assert_not_called()
