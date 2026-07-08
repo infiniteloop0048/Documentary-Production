@@ -185,11 +185,18 @@ function startConfig(mode) {
     badge.textContent = 'Guided Mode';
     badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-[#0c2d42] text-sky-400';
     _q('topic-row').style.display = '';
+  } else if (mode === 'short') {
+    badge.textContent = 'Short / Reel Mode';
+    badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-rose-900/40 text-rose-300';
+    _q('topic-row').style.display = '';
   } else {
     badge.textContent = 'Full Auto Mode';
     badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-purple-900/40 text-purple-300';
     _q('topic-row').style.display = 'none';
   }
+  _q('doc-duration-row').style.display = mode === 'short' ? 'none' : '';
+  _q('short-duration-row').style.display = mode === 'short' ? '' : 'none';
+  _q('aspect-row').style.display = mode === 'short' ? '' : 'none';
   showScreen('config');
 }
 
@@ -205,8 +212,29 @@ function updateDurationHint() {
     `Target: ${mins} min ${secs} s ≈ ${words} words of narration`;
 }
 
+function updateShortsDurationHint() {
+  const secs = parseInt(_q('shorts-duration-slider').value) || 30;
+  _q('shorts-duration-label').textContent = secs + ' s';
+  const words = Math.round((secs / 60) * 170);
+  _q('shorts-duration-hint').textContent = `Target: ${secs}s ≈ ${words} words of narration`;
+}
+
 async function startRun() {
   const topic = (_q('topic-input')?.value || '').trim();
+  if (_runMode === 'short') {
+    if (!topic) {
+      _q('topic-input').focus();
+      _q('topic-input').classList.add('border-red-500');
+      return;
+    }
+    const secs = parseInt(_q('shorts-duration-slider').value) || 30;
+    showScreen('progress');
+    _resetProgress();
+    startPolling();
+    const res = await window.pywebview.api.start_shorts_run({ topic, duration_seconds: secs });
+    if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
+    return;
+  }
   const minutes = parseInt(_q('duration-input').value) || 0;
   const seconds = _clampSeconds(parseInt(_q('duration-seconds-input').value) || 0);
   if (_runMode === 'guided' && !topic) {
@@ -377,6 +405,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (dur) dur.addEventListener('input', updateDurationHint);
   const durSec = _q('duration-seconds-input');
   if (durSec) durSec.addEventListener('input', updateDurationHint);
+  const shortsDur = _q('shorts-duration-slider');
+  if (shortsDur) shortsDur.addEventListener('input', updateShortsDurationHint);
   // Wire cancel button
   _q('cancel-btn').addEventListener('click', cancelRun);
   // Init provider models

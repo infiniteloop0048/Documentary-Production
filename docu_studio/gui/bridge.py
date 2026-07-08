@@ -209,6 +209,93 @@ class Bridge:
             import traceback
             return {"ok": False, "error": str(exc) + "\n" + traceback.format_exc()}
 
+    def start_shorts_run(self, config: dict) -> dict:
+        if self._run_thread and self._run_thread.is_alive():
+            return {"ok": False, "error": "A run is already in progress"}
+        try:
+            from docu_studio.adapters.footage.factory import build_footage_providers
+            from docu_studio.adapters.llm.factory import build_llm
+            from docu_studio.adapters.tts.factory import build_tts
+            from docu_studio.shorts.shorts_runner import ShortsRunner
+
+            s = self._settings
+            provider = getattr(s, "llm_provider", "Anthropic")
+            model    = getattr(s, "llm_model",    "claude-sonnet-4-5")
+            key_map  = {
+                "Anthropic":  key_cache.get("docu_studio_anthropic"),
+                "OpenAI":     key_cache.get("docu_studio_openai"),
+                "OpenRouter": key_cache.get("docu_studio_openrouter"),
+                "Groq":       key_cache.get("docu_studio_groq"),
+            }
+            llm_key     = key_map.get(provider, "") or ""
+            tts_prov    = getattr(s, "tts_provider", "elevenlabs")
+            tts_key     = (
+                key_cache.get("docu_studio_elevenlabs")
+                if tts_prov == "elevenlabs"
+                else key_cache.get("docu_studio_deepgram_key")
+            )
+            pexels_key  = key_cache.get("docu_studio_pexels")
+            pixabay_key = key_cache.get("docu_studio_pixabay")
+            coverr_key  = key_cache.get("docu_studio_coverr")
+
+            llm = build_llm(provider, llm_key, model)
+            tts = build_tts(
+                tts_prov, tts_key or "",
+                getattr(s, "deepgram_voice", "aura-asteria-en"),
+            )
+            footage_list = build_footage_providers(
+                getattr(s, "footage_primary",   "pexels"),
+                getattr(s, "footage_fallback",  "pixabay"),
+                pexels_key  or "",
+                pixabay_key or "",
+                coverr_key  or "",
+                fallback2=getattr(s, "footage_fallback2", "none"),
+            )
+
+            while not self._event_q.empty():
+                try:
+                    self._event_q.get_nowait()
+                except queue.Empty:
+                    break
+
+            output_base = (
+                Path(s.output_folder)
+                if getattr(s, "output_folder", None)
+                else Path.home() / "DocuStudio"
+            )
+            duration_seconds = int(config.get("duration_seconds", 30))
+
+            self._runner = ShortsRunner(
+                topic=config.get("topic", ""),
+                duration_seconds=duration_seconds,
+                llm=llm,
+                tts=tts,
+                footage_providers=footage_list,
+                output_base=output_base,
+                sensitive_keys=[
+                    v for v in [llm_key, tts_key, pexels_key, pixabay_key, coverr_key] if v
+                ],
+            )
+
+            def _run() -> None:
+                try:
+                    self._runner.run()
+                except Exception as exc:
+                    import traceback
+                    self._event_q.put({
+                        "type": "error",
+                        "message": str(exc) + "\n" + traceback.format_exc(),
+                    })
+
+            self._run_thread = threading.Thread(target=_run, daemon=True)
+            self._run_thread.start()
+            threading.Thread(target=self._translate_events, daemon=True).start()
+            return {"ok": True}
+
+        except Exception as exc:
+            import traceback
+            return {"ok": False, "error": str(exc) + "\n" + traceback.format_exc()}
+
     def cancel_run(self) -> dict:
         if self._runner:
             try:
