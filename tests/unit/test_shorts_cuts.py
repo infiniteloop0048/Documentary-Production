@@ -7,6 +7,7 @@ from docu_studio.shorts.shorts_cuts import (
     MAX_SEGMENT_DURATION,
     MIN_SEGMENT_DELTA,
     MIN_SEGMENT_DURATION,
+    choose_crop_strategy,
     plan_cuts,
 )
 
@@ -62,3 +63,26 @@ class TestPlanCuts:
     def test_rejects_non_positive_n_clips(self) -> None:
         with pytest.raises(ValueError):
             plan_cuts(total_duration=10.0, n_clips=0, seed=1)
+
+
+class TestChooseCropStrategy:
+    def test_standard_16_9_uses_center_crop(self) -> None:
+        assert choose_crop_strategy(1920, 1080) == "center_crop"
+
+    def test_already_vertical_source_uses_center_crop(self) -> None:
+        assert choose_crop_strategy(1080, 1920) == "center_crop"
+
+    def test_square_source_uses_center_crop(self) -> None:
+        assert choose_crop_strategy(1080, 1080) == "center_crop"
+
+    def test_moderately_wide_21_9_uses_center_crop(self) -> None:
+        assert choose_crop_strategy(2560, 1080) == "center_crop"
+
+    def test_ultra_wide_32_9_uses_blur_pad(self) -> None:
+        assert choose_crop_strategy(3840, 1080) == "blur_pad"
+
+    def test_rejects_non_positive_dimensions(self) -> None:
+        with pytest.raises(ValueError):
+            choose_crop_strategy(0, 1080)
+        with pytest.raises(ValueError):
+            choose_crop_strategy(1920, 0)
