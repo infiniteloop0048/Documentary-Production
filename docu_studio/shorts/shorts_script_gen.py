@@ -7,13 +7,7 @@ break_into_scenes is repurposed to obtain structured per-sentence JSON.
 """
 from __future__ import annotations
 
-import logging
 import re
-from dataclasses import dataclass
-
-from docu_studio.adapters.llm.base import LLMProvider
-
-_log = logging.getLogger(__name__)
 
 SHORTS_WPM = 170
 
