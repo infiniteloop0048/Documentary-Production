@@ -50,24 +50,26 @@ class ShortsFFmpeg(FFmpegWrapper):
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=_MOTION_DETECT_TIMEOUT,
             )
-            if result.returncode != 0:
-                raise RuntimeError(result.stderr.strip())
-            best_time = self._best_scene_time(result.stderr, usable)
-            return best_time, "motion"
-        except (subprocess.TimeoutExpired, Exception) as exc:
+            self._check(result, f"detect_motion_window → {clip_path!r}")
+            best_time, used_fallback = self._best_scene_time(result.stderr, usable, clip_duration)
+            return best_time, "fallback" if used_fallback else "motion"
+        except Exception as exc:
             _log.info("detect_motion_window: falling back for %s (%s)", clip_path, exc)
-            return round(usable * _FALLBACK_WINDOW_FRACTION, 2), "fallback"
+            return min(round(clip_duration * _FALLBACK_WINDOW_FRACTION, 2), usable), "fallback"
 
     @staticmethod
-    def _best_scene_time(ffmpeg_stderr: str, usable: float) -> float:
+    def _best_scene_time(
+        ffmpeg_stderr: str, usable: float, clip_duration: float
+    ) -> tuple[float, bool]:
         """Parse 'pts_time:X' markers from ffmpeg's scene-metadata stderr and return
-        the latest one that still leaves room for a full window, or the fallback
-        point if none were found."""
+        (time, used_fallback) — the latest marker that still leaves room for a full
+        window, or the fallback point (with used_fallback=True) if none were found."""
         times = [float(m) for m in re.findall(r"pts_time:([\d.]+)", ffmpeg_stderr)]
         candidates = [t for t in times if t <= usable]
         if not candidates:
-            return round(usable * _FALLBACK_WINDOW_FRACTION, 2)
-        return round(max(candidates), 2)
+            fallback = min(round(clip_duration * _FALLBACK_WINDOW_FRACTION, 2), usable)
+            return fallback, True
+        return round(max(candidates), 2), False
 
     def vertical_convert(self, input_path: str, output_path: str, strategy: str) -> None:
         """Convert *input_path* to a 1080x1920 vertical video.
@@ -114,7 +116,7 @@ class ShortsFFmpeg(FFmpegWrapper):
         if direction == "in":
             zoom_expr = "min(zoom+0.0015,1.08)"
         else:
-            zoom_expr = "if(eq(on,1),1.08,max(zoom-0.0015,1.0))"
+            zoom_expr = "if(eq(on,0),1.08,max(zoom-0.0015,1.0))"
         if pan:
             x_expr = f"iw/2-(iw/zoom/2)+(on/{frames})*40"
         else:
