@@ -74,6 +74,8 @@ class ShortsRunner(threading.Thread):
             self.event_queue.put(None)
 
     def _execute(self) -> None:
+        if self._cancelled():
+            return
         self._project_folder = create_project_folder(
             self.config.topic, self._started_at, self.output_base
         )
