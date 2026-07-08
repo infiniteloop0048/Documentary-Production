@@ -11,13 +11,25 @@ from docu_studio.adapters.footage.base import FootageProvider
 from docu_studio.pipeline.events import LogEvent, LogLevel, ProgressEvent
 from docu_studio.pipeline.stages.footage_assembly import download_clip
 from docu_studio.shorts.capability_resolvers import WordTiming
-from docu_studio.shorts.shorts_cuts import MAX_SEGMENT_DURATION, Segment, choose_crop_strategy, plan_cuts
+from docu_studio.shorts.shorts_cuts import (
+    MAX_SEGMENT_DURATION,
+    MIN_SEGMENT_DURATION,
+    Segment,
+    choose_crop_strategy,
+    plan_cuts,
+)
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_script_gen import ShortsScript
 
 _log = logging.getLogger(__name__)
 
 _MIN_CLIPS = 6
+
+# plan_cuts' final segment can require up to MIN_SEGMENT_DURATION + MAX_SEGMENT_DURATION
+# (it's trimmed to land exactly on the audio end) — every downloaded clip must be at
+# least that long, since plan_cuts assigns clips to segments round-robin and any clip
+# can land on the final one.
+_MIN_CLIP_DURATION = MIN_SEGMENT_DURATION + MAX_SEGMENT_DURATION
 
 
 def _search_dedup(
@@ -46,15 +58,16 @@ def _collect_clips(
 ) -> list[dict]:
     """Fetch and download clips for the per-sentence queries, deduped, padded to at
     least _MIN_CLIPS using the topic-level (first) query if short. Every clip is
-    searched with min_duration >= MAX_SEGMENT_DURATION so any assigned segment
-    always fits inside the downloaded clip. Returns [{path, width, height}, ...]."""
-    per_sentence = _search_dedup(providers, script.visual_queries, min_duration=MAX_SEGMENT_DURATION)
+    searched with min_duration >= _MIN_CLIP_DURATION so any assigned segment —
+    including a worst-case final segment — always fits inside the downloaded clip.
+    Returns [{path, width, height}, ...]."""
+    per_sentence = _search_dedup(providers, script.visual_queries, min_duration=_MIN_CLIP_DURATION)
     n_needed = max(_MIN_CLIPS, len(script.sentences))
 
     pool = list(per_sentence)
     if len(pool) < n_needed:
         topic_query = script.visual_queries[0] if script.visual_queries else "documentary footage"
-        extra = _search_dedup(providers, [topic_query], min_duration=MAX_SEGMENT_DURATION)
+        extra = _search_dedup(providers, [topic_query], min_duration=_MIN_CLIP_DURATION)
         existing_urls = {p[0] for p in pool}
         for item in extra:
             if item[0] not in existing_urls:
