@@ -34,10 +34,117 @@
     ::-webkit-scrollbar-track { background: #1c1e24; }
     ::-webkit-scrollbar-thumb { background: #383b45; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #52566a; }
+
+    /* ── Animation tokens ─────────────────────────────────────────── */
+    :root {
+      --anim-fast: 150ms;
+      --anim-med: 200ms;
+      --anim-slow: 320ms;
+      --ease-out: cubic-bezier(.16,1,.3,1);
+    }
+    [data-screen] { position: relative; z-index: 1; }
+
+    /* ── Ambient background ───────────────────────────────────────── */
+    .bg-orbs {
+      position: fixed; inset: 0; z-index: -1;
+      overflow: hidden; pointer-events: none;
+    }
+    .bg-orbs .orb {
+      position: absolute; border-radius: 50%;
+      filter: blur(70px); will-change: transform;
+    }
+    .orb-a { width: 480px; height: 480px; top: -140px; left: -120px;
+      background: #38bdf8; opacity: .14; animation: orbFloatA 26s var(--ease-out) infinite; }
+    .orb-b { width: 420px; height: 420px; bottom: -160px; right: -100px;
+      background: #a855f7; opacity: .12; animation: orbFloatB 32s var(--ease-out) infinite; }
+    .orb-c { width: 320px; height: 320px; top: 40%; left: 55%;
+      background: #0284c7; opacity: .10; animation: orbFloatC 22s var(--ease-out) infinite; }
+    @keyframes orbFloatA {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(60px, 50px) scale(1.08); }
+    }
+    @keyframes orbFloatB {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(-50px, -40px) scale(1.06); }
+    }
+    @keyframes orbFloatC {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(-40px, 30px) scale(0.94); }
+    }
+
+    /* ── Card entrance + hover lift ────────────────────────────────── */
+    @keyframes cardEnter {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .anim-card {
+      animation: cardEnter var(--anim-slow) var(--ease-out) both;
+      transition: transform var(--anim-med) var(--ease-out),
+                  box-shadow var(--anim-med) var(--ease-out),
+                  border-color var(--anim-fast) var(--ease-out);
+      will-change: transform;
+    }
+    .anim-card:hover {
+      transform: translateY(-4px) scale(1.015);
+      box-shadow: 0 8px 30px -8px rgba(56,189,248,.35), 0 2px 10px rgba(0,0,0,.35);
+    }
+    .anim-card--purple:hover {
+      box-shadow: 0 8px 30px -8px rgba(168,85,247,.35), 0 2px 10px rgba(0,0,0,.35);
+    }
+    .grid.grid-cols-2 > .anim-card:nth-child(1) { animation-delay: 0ms; }
+    .grid.grid-cols-2 > .anim-card:nth-child(2) { animation-delay: 70ms; }
+    #settings-cards > .anim-card:nth-child(1) { animation-delay: 0ms; }
+    #settings-cards > .anim-card:nth-child(2) { animation-delay: 50ms; }
+    #settings-cards > .anim-card:nth-child(3) { animation-delay: 100ms; }
+    #settings-cards > .anim-card:nth-child(4) { animation-delay: 150ms; }
+    #settings-cards > .anim-card:nth-child(5) { animation-delay: 200ms; }
+
+    /* ── Buttons ───────────────────────────────────────────────────── */
+    button { transition: transform var(--anim-fast) var(--ease-out),
+                         filter var(--anim-fast) var(--ease-out),
+                         box-shadow var(--anim-fast) var(--ease-out); }
+    button:active { transform: scale(0.97); }
+    #start-run-btn:hover, #save-btn:hover {
+      filter: brightness(1.08);
+      box-shadow: 0 0 16px -2px rgba(56,189,248,.55);
+    }
+    #open-folder-btn:hover {
+      filter: brightness(1.08);
+      box-shadow: 0 0 16px -2px rgba(34,197,94,.55);
+    }
+    .ripple {
+      position: absolute; border-radius: 50%; pointer-events: none;
+      background: rgba(255,255,255,.45); transform: scale(0); opacity: .6;
+      animation: rippleOut 500ms var(--ease-out) forwards;
+    }
+    @keyframes rippleOut { to { transform: scale(1); opacity: 0; } }
+
+    /* ── Status badge entrance ────────────────────────────────────── */
+    @keyframes badgeEnter {
+      from { opacity: 0; transform: translateX(-6px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .badge-enter { animation: badgeEnter var(--anim-med) var(--ease-out) both; }
+
+    /* ── Reduced motion ───────────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      .bg-orbs { display: none; }
+      .anim-card, .badge-enter, .ripple, button {
+        animation: none !important;
+        transition: none !important;
+      }
+      .anim-card:hover { transform: none !important; box-shadow: none !important; }
+      button:active { transform: none !important; }
+    }
   </style>
 </head>
 <body class="bg-app text-white font-sans">
 <div style="position:fixed;top:0;right:0;background:red;color:white;z-index:9999;padding:4px">v4</div>
+<div class="bg-orbs" aria-hidden="true">
+  <div class="orb orb-a"></div>
+  <div class="orb orb-b"></div>
+  <div class="orb orb-c"></div>
+</div>
 
 <!-- ═══════════════════════════════════════════════════════════════
      SCREEN 1: MAIN
@@ -58,7 +165,7 @@
     </button>
   </div>
   <!-- Content -->
-  <div class="flex-1 overflow-y-auto bg-app">
+  <div class="flex-1 overflow-y-auto">
     <div class="max-w-4xl mx-auto pt-16 pb-12 px-6">
       <!-- Hero -->
       <h1 class="text-4xl font-bold text-white leading-tight">Automate your documentary pre-production</h1>
@@ -67,14 +174,14 @@
       <!-- Mode cards -->
       <div class="mt-12 grid grid-cols-2 gap-6">
         <!-- Guided -->
-        <div onclick="startConfig('guided')" class="bg-card border border-border rounded-xl p-8 hover:border-accent transition-colors cursor-pointer">
+        <div onclick="startConfig('guided')" class="anim-card bg-card border border-border rounded-xl p-8 hover:border-accent transition-colors cursor-pointer">
           <div class="text-xs font-semibold tracking-widest text-accent">GUIDED MODE</div>
           <div class="text-xl font-semibold text-white mt-2">You choose the topic</div>
           <p class="text-sm text-dim mt-3 leading-relaxed">Enter your documentary topic and target duration. The app writes the script, records voiceover, sources footage, and exports a Filmora timeline.</p>
           <button class="mt-6 bg-accent text-app font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-adark transition-colors pointer-events-none">Start guided run →</button>
         </div>
         <!-- Full Auto -->
-        <div onclick="startConfig('auto')" class="bg-card border border-border rounded-xl p-8 hover:border-purple-400 transition-colors cursor-pointer">
+        <div onclick="startConfig('auto')" class="anim-card anim-card--purple bg-card border border-border rounded-xl p-8 hover:border-purple-400 transition-colors cursor-pointer">
           <div class="text-xs font-semibold tracking-widest text-purple-400">FULL AUTO MODE</div>
           <div class="text-xl font-semibold text-white mt-2">AI finds a trending topic</div>
           <p class="text-sm text-dim mt-3 leading-relaxed">No input needed. The app searches for trending documentary subjects, picks the best one, and runs the entire pipeline automatically.</p>
@@ -102,11 +209,11 @@
     <span class="font-semibold text-white ml-4">Configure run</span>
   </div>
   <!-- Content -->
-  <div class="flex-1 overflow-y-auto bg-app">
+  <div class="flex-1 overflow-y-auto">
     <div class="max-w-lg mx-auto pt-16 px-6">
       <span id="config-mode-badge" class="text-xs font-semibold px-3 py-1 rounded-full bg-atint text-accent">Guided Mode</span>
 
-      <div class="mt-8 bg-card border border-border rounded-xl p-8">
+      <div class="anim-card mt-8 bg-card border border-border rounded-xl p-8">
         <!-- Topic row -->
         <div id="topic-row">
           <label class="text-sm font-medium text-dim block">Documentary topic</label>
@@ -120,10 +227,13 @@
           <label class="text-sm font-medium text-dim block">Target duration</label>
           <div class="mt-2 flex items-center">
             <input id="duration-input" type="number" min="1" max="120" value="5"
-              class="w-28 bg-input border border-border rounded-lg px-4 py-3 text-white text-sm text-center focus:border-accent focus:outline-none">
-            <span class="text-sm text-dim ml-3">minutes</span>
+              class="w-24 bg-input border border-border rounded-lg px-4 py-3 text-white text-sm text-center focus:border-accent focus:outline-none">
+            <span class="text-sm text-dim ml-2 mr-4">min</span>
+            <input id="duration-seconds-input" type="number" min="0" max="59" step="1" value="0"
+              class="w-24 bg-input border border-border rounded-lg px-4 py-3 text-white text-sm text-center focus:border-accent focus:outline-none">
+            <span class="text-sm text-dim ml-2">sec</span>
           </div>
-          <div id="duration-hint" class="mt-3 text-xs text-faint">A 5-minute documentary ≈ 750 words of narration</div>
+          <div id="duration-hint" class="mt-3 text-xs text-faint">Target: 5 min 0 s ≈ 750 words of narration</div>
         </div>
 
         <!-- Start button -->
@@ -147,7 +257,7 @@
     <span id="progress-title" class="font-semibold text-white ml-4">Generating…</span>
   </div>
   <!-- Content -->
-  <div class="flex-1 overflow-y-auto bg-app">
+  <div class="flex-1 overflow-y-auto">
     <div class="max-w-3xl mx-auto pt-10 px-6">
       <!-- Stage tracker -->
       <div class="flex flex-wrap gap-2" id="stage-track">
@@ -189,11 +299,11 @@
     <span class="font-semibold text-white ml-4">Settings</span>
   </div>
   <!-- Content -->
-  <div class="flex-1 overflow-y-auto bg-app">
-    <div class="max-w-2xl mx-auto pt-8 pb-32 px-6">
+  <div class="flex-1 overflow-y-auto">
+    <div id="settings-cards" class="max-w-2xl mx-auto pt-8 pb-32 px-6">
 
       <!-- CARD 1: Language Model -->
-      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+      <div class="anim-card bg-card border border-border rounded-xl mb-5 overflow-hidden">
         <div class="h-0.5 w-full bg-accent"></div>
         <div class="px-6 py-4 border-b border-border">
           <span class="font-semibold text-white text-sm">Language Model</span>
@@ -251,7 +361,7 @@
       </div>
 
       <!-- CARD 2: Voice Synthesis -->
-      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+      <div class="anim-card bg-card border border-border rounded-xl mb-5 overflow-hidden">
         <div class="h-0.5 w-full bg-purple-500"></div>
         <div class="px-6 py-4 border-b border-border">
           <span class="font-semibold text-white text-sm">Voice Synthesis</span>
@@ -286,7 +396,7 @@
       </div>
 
       <!-- CARD 3: Stock Footage -->
-      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+      <div class="anim-card bg-card border border-border rounded-xl mb-5 overflow-hidden">
         <div class="h-0.5 w-full bg-green-500"></div>
         <div class="px-6 py-4 border-b border-border">
           <span class="font-semibold text-white text-sm">Stock Footage</span>
@@ -409,7 +519,7 @@
       </div>
 
       <!-- CARD 4: Topic Discovery -->
-      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+      <div class="anim-card bg-card border border-border rounded-xl mb-5 overflow-hidden">
         <div class="h-0.5 w-full bg-orange-500"></div>
         <div class="px-6 py-4 border-b border-border">
           <span class="font-semibold text-white text-sm">Topic Discovery</span>
@@ -424,7 +534,7 @@
       </div>
 
       <!-- CARD 5: Output & Narration -->
-      <div class="bg-card border border-border rounded-xl mb-5 overflow-hidden">
+      <div class="anim-card bg-card border border-border rounded-xl mb-5 overflow-hidden">
         <div class="h-0.5 w-full bg-bstrong"></div>
         <div class="px-6 py-4 border-b border-border">
           <span class="font-semibold text-white text-sm">Output & Narration</span>

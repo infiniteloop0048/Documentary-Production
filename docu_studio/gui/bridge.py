@@ -17,6 +17,14 @@ from docu_studio.config import key_cache
 from docu_studio.config.settings import Settings
 
 
+def duration_to_minutes(minutes: int, seconds: int) -> float:
+    """Convert a (minutes, seconds) target duration into precise fractional minutes."""
+    total = minutes + seconds / 60.0
+    if total <= 0:
+        raise ValueError("Target duration must be greater than 0 seconds.")
+    return total
+
+
 class Bridge:
     _STAGE_MAP = {
         "script":   0, "scene":    1, "audio":    2,
@@ -164,9 +172,13 @@ class Bridge:
                 else Path.home() / "DocuStudio"
             )
             mode_str = config.get("mode", "guided")
+            duration_minutes = duration_to_minutes(
+                int(config.get("duration_minutes", 5)),
+                int(config.get("duration_seconds", 0)),
+            )
             self._runner = PipelineRunner(
                 topic=config.get("topic", ""),
-                duration_minutes=int(config.get("duration_minutes", 5)),
+                duration_minutes=duration_minutes,
                 mode=RunMode(mode_str),
                 llm=llm,
                 tts=tts,

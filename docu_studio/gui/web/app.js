@@ -193,25 +193,37 @@ function startConfig(mode) {
   showScreen('config');
 }
 
+function _clampSeconds(s) {
+  return Math.min(59, Math.max(0, s));
+}
+
 function updateDurationHint() {
-  const mins = parseInt(_q('duration-input').value) || 5;
+  const mins = parseInt(_q('duration-input').value) || 0;
+  const secs = _clampSeconds(parseInt(_q('duration-seconds-input').value) || 0);
+  const words = Math.round((mins + secs / 60) * 150);
   _q('duration-hint').textContent =
-    `A ${mins}-minute documentary ≈ ${mins * 150} words of narration`;
+    `Target: ${mins} min ${secs} s ≈ ${words} words of narration`;
 }
 
 async function startRun() {
   const topic = (_q('topic-input')?.value || '').trim();
-  const duration = parseInt(_q('duration-input').value) || 5;
+  const minutes = parseInt(_q('duration-input').value) || 0;
+  const seconds = _clampSeconds(parseInt(_q('duration-seconds-input').value) || 0);
   if (_runMode === 'guided' && !topic) {
     _q('topic-input').focus();
     _q('topic-input').classList.add('border-red-500');
+    return;
+  }
+  if (minutes * 60 + seconds <= 0) {
+    _q('duration-input').focus();
+    _q('duration-input').classList.add('border-red-500');
     return;
   }
   showScreen('progress');
   _resetProgress();
   startPolling();
   const res = await window.pywebview.api.start_run({
-    mode: _runMode, topic, duration_minutes: duration,
+    mode: _runMode, topic, duration_minutes: minutes, duration_seconds: seconds,
   });
   if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
 }
@@ -304,6 +316,16 @@ function _handleEvent(ev) {
 
 // ── History ───────────────────────────────────────────────────────────────
 
+const STATUS_BADGE_STYLES = {
+  completed: 'bg-green-900/40 text-green-400',
+  cancelled: 'bg-amber-900/40 text-amber-400',
+  failed:    'bg-red-900/40 text-red-400',
+};
+
+function _statusBadgeClass(status) {
+  return STATUS_BADGE_STYLES[status] || 'bg-amber-900/40 text-amber-400';
+}
+
 async function _loadHistory() {
   try {
     const runs = await window.pywebview.api.get_history();
@@ -313,14 +335,13 @@ async function _loadHistory() {
       empty.style.display = ''; list.style.display = 'none'; return;
     }
     empty.style.display = 'none'; list.style.display = '';
-    list.innerHTML = runs.slice(0, 5).map(r => `
-      <div class="flex items-center justify-between bg-card border border-border rounded-xl px-5 py-4 mb-3">
+    list.innerHTML = runs.slice(0, 5).map((r, i) => `
+      <div class="anim-card flex items-center justify-between bg-card border border-border rounded-xl px-5 py-4 mb-3" style="animation-delay:${i * 40}ms">
         <div>
           <div class="text-sm font-medium text-white">${r.topic || 'Auto topic'}</div>
           <div class="text-xs text-faint mt-0.5">${r.created_at || ''} · ${r.duration_minutes || '?'} min</div>
         </div>
-        <span class="text-xs px-2.5 py-1 rounded-full ${r.status === 'complete'
-          ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'}">${r.status}</span>
+        <span class="badge-enter text-xs px-2.5 py-1 rounded-full ${_statusBadgeClass(r.status)}" style="animation-delay:${i * 40 + 100}ms">${r.status}</span>
       </div>
     `).join('');
   } catch (_) {}
@@ -330,6 +351,22 @@ async function _loadHistory() {
 
 function _q(id) { return document.getElementById(id); }
 
+function _addRipple(e) {
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height) * 1.6;
+  const ripple = document.createElement('span');
+  ripple.className = 'ripple';
+  ripple.style.width = ripple.style.height = size + 'px';
+  ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+  ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+  const prevPosition = getComputedStyle(btn).position;
+  if (prevPosition === 'static') btn.style.position = 'relative';
+  btn.style.overflow = 'hidden';
+  btn.appendChild(ripple);
+  ripple.addEventListener('animationend', () => ripple.remove());
+}
+
 // Init
 document.addEventListener('DOMContentLoaded', () => {
   _loadHistory();
@@ -338,8 +375,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Wire duration hint
   const dur = _q('duration-input');
   if (dur) dur.addEventListener('input', updateDurationHint);
+  const durSec = _q('duration-seconds-input');
+  if (durSec) durSec.addEventListener('input', updateDurationHint);
   // Wire cancel button
   _q('cancel-btn').addEventListener('click', cancelRun);
   // Init provider models
   onProviderChange('Anthropic');
+  // Wire ripple effect on primary CTA buttons
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    ['start-run-btn', 'save-btn'].forEach(id => {
+      const el = _q(id);
+      if (el) el.addEventListener('click', _addRipple);
+    });
+  }
 });
