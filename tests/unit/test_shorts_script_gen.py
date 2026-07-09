@@ -185,3 +185,77 @@ class TestMusicMoodField:
         ]
         generate_shorts_script("Space facts", 30, llm)
         assert llm.break_into_scenes.call_count == 2
+
+
+class TestPunchField:
+    def test_parses_punch_from_the_matching_sentence(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Fact one is huge. Ninety percent agree. Loop back now."
+        llm.break_into_scenes.return_value = [
+            {"title": "aerial city night", "narration": "Fact one is huge."},
+            {"title": "chart closeup", "narration": "Ninety percent agree.", "punch": "90 PERCENT"},
+            {"title": "sunrise timelapse", "narration": "Loop back now."},
+        ]
+        result = generate_shorts_script("Cities at night", 30, llm)
+        assert result.punch == (1, "90 PERCENT")
+
+    def test_defaults_to_none_when_field_absent(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
+        llm.break_into_scenes.return_value = [
+            {"title": "aerial city night", "narration": "Fact one is huge."},
+            {"title": "close-up hands typing", "narration": "Fact two is bigger."},
+        ]
+        result = generate_shorts_script("Cities at night", 30, llm)
+        assert result.punch is None
+
+    def test_defaults_to_none_when_punch_exceeds_four_words(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
+        llm.break_into_scenes.return_value = [
+            {"title": "aerial city night", "narration": "Fact one is huge.",
+             "punch": "this is way too many words"},
+            {"title": "close-up hands typing", "narration": "Fact two is bigger."},
+        ]
+        result = generate_shorts_script("Cities at night", 30, llm)
+        assert result.punch is None
+
+    def test_defaults_to_none_when_extraction_fails_entirely(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "One sentence. Two sentence."
+        llm.break_into_scenes.side_effect = RuntimeError("model returned invalid JSON")
+        result = generate_shorts_script("Space facts", 30, llm)
+        assert result.punch is None
+
+    def test_punch_text_is_uppercased(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
+        llm.break_into_scenes.return_value = [
+            {"title": "a", "narration": "Fact one is huge.", "punch": "one million years"},
+            {"title": "b", "narration": "Fact two is bigger."},
+        ]
+        result = generate_shorts_script("Cities at night", 30, llm)
+        assert result.punch == (0, "ONE MILLION YEARS")
+
+    def test_punch_extraction_does_not_add_extra_llm_calls(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "One sentence. Two sentence."
+        llm.break_into_scenes.side_effect = [
+            [{"title": "only one", "narration": "One sentence."}],
+            RuntimeError("still bad"),
+        ]
+        generate_shorts_script("Space facts", 30, llm)
+        assert llm.break_into_scenes.call_count == 2
+
+    def test_punch_recovered_from_retry_when_first_attempt_had_none(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "One sentence. Two sentence."
+        llm.break_into_scenes.side_effect = [
+            [{"title": "only one", "narration": "One sentence."}],  # count mismatch -> retry
+            [
+                {"title": "a", "narration": "One sentence.", "punch": "BIG NUMBER"},
+                {"title": "b", "narration": "Two sentence."},
+            ],
+        ]
+        result = generate_shorts_script("Space facts", 30, llm)
+        assert result.punch == (0, "BIG NUMBER")

@@ -18,6 +18,7 @@ from docu_studio.shorts.shorts_tts_calibration import get_wpm
 _log = logging.getLogger(__name__)
 
 SHORTS_WPM = 170
+_PUNCH_MAX_WORDS = 4
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
@@ -69,6 +70,11 @@ _QUERY_OVERRIDE_TEMPLATE = (
     "Additionally, on the FIRST entry only, include a 'music_mood' key: a single "
     "word describing the ideal background music mood for this whole video (e.g. "
     "'epic', 'calm', 'upbeat', 'mysterious'). Omit this key on every other entry.\n"
+    "Additionally, on the ONE sentence (if any) that contains the single most "
+    "striking stat or phrase, include a 'punch' key: that stat or phrase in 4 "
+    "words or fewer (e.g. '90 percent', 'one million years'). Omit this key on "
+    "every other entry, and omit it entirely if no sentence has a standout "
+    "stat or phrase.\n"
     "Return one entry per sentence, in order."
 )
 
@@ -79,6 +85,7 @@ class ShortsScript:
     sentences: list[str]
     visual_queries: list[str]
     music_mood: str = DEFAULT_MUSIC_MOOD
+    punch: tuple[int, str] | None = None
 
 
 def _fallback_queries(topic: str, count: int) -> list[str]:
@@ -126,6 +133,25 @@ def _mood_from_raw(raw: list[dict] | None) -> str:
     return DEFAULT_MUSIC_MOOD
 
 
+def _punch_from_raw(raw: list[dict] | None) -> tuple[int, str] | None:
+    """Return (sentence_index, punch_text) for the first entry carrying a
+    valid 'punch' field (1-4 words after stripping, uppercased), or None if
+    absent, malformed, or no candidate validates."""
+    if not raw:
+        return None
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        punch = str(item.get("punch", "")).strip()
+        if not punch:
+            continue
+        words = punch.split()
+        if 1 <= len(words) <= _PUNCH_MAX_WORDS:
+            return i, punch.upper()
+        _log.info("Shorts punch field malformed (%r), ignoring", punch)
+    return None
+
+
 def generate_shorts_script(
     topic: str,
     duration_seconds: int,
@@ -157,18 +183,26 @@ def generate_shorts_script(
     raw = _fetch_scene_json(llm, text)
     queries = _queries_from_raw(raw, len(sentences))
     music_mood = _mood_from_raw(raw)
+    punch = _punch_from_raw(raw)
     if queries is None:
         _log.info("Shorts visual-query extraction failed, retrying once")
         raw = _fetch_scene_json(llm, text)
         queries = _queries_from_raw(raw, len(sentences))
         if music_mood == DEFAULT_MUSIC_MOOD:
             music_mood = _mood_from_raw(raw)
+        if punch is None:
+            punch = _punch_from_raw(raw)
     if queries is None:
         _log.warning(
             "Shorts visual-query extraction failed twice, falling back to topic-level query"
         )
         queries = _fallback_queries(topic, len(sentences))
 
+    if punch is not None and not (0 <= punch[0] < len(sentences)):
+        _log.info("Shorts punch sentence index %d out of range — discarding", punch[0])
+        punch = None
+
     return ShortsScript(
-        text=text, sentences=sentences, visual_queries=queries, music_mood=music_mood,
+        text=text, sentences=sentences, visual_queries=queries,
+        music_mood=music_mood, punch=punch,
     )
