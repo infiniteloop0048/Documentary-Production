@@ -18,7 +18,7 @@ from docu_studio.shorts.shorts_cuts import (
     choose_crop_strategy,
     plan_cuts,
 )
-from docu_studio.shorts.music_library import MUSIC_DIR, select_music_track
+from docu_studio.shorts.music_providers import resolve_music_track
 from docu_studio.shorts.shorts_captions import write_ass_file
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_script_gen import ShortsScript
@@ -138,6 +138,8 @@ def assemble_short(
     event_queue: queue.Queue,
     captions_enabled: bool = True,
     music_enabled: bool = True,
+    music_provider: str = "local",
+    jamendo_client_id: str = "",
 ) -> None:
     """Build the final vertical short: fetch footage, plan cuts, window/convert/
     Ken-Burns each segment, concat, and mux with the TTS audio track."""
@@ -213,19 +215,26 @@ def assemble_short(
     audio_for_mux = audio_path
     if music_enabled:
         try:
-            track = select_music_track(seed=seed)
-            if track is None:
+            resolved = resolve_music_track(
+                music_provider,
+                mood=script.music_mood,
+                max_duration=audio_duration,
+                jamendo_client_id=jamendo_client_id,
+                seed=seed,
+            )
+            if resolved is None:
                 event_queue.put(LogEvent(
                     message="No usable music track found — skipping music bed.",
                     level=LogLevel.INFO,
                 ))
             else:
-                music_path = str(MUSIC_DIR / track.filename)
+                music_path, track_label = resolved
                 mixed_audio = str(scene_dir / "audio_mixed.m4a")
                 ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio)
                 audio_for_mux = mixed_audio
                 event_queue.put(LogEvent(
-                    message=f"Music bed mixed in ({track.mood}, {track.bpm} BPM).",
+                    message=f"Music bed mixed in ({track_label}, provider={music_provider}, "
+                            f"mood={script.music_mood}).",
                     level=LogLevel.INFO,
                 ))
         except Exception as exc:

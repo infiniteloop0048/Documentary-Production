@@ -51,6 +51,8 @@ class ShortsRunner(threading.Thread):
         seed: int | None = None,
         tts_provider: str = "",
         tts_voice: str = "",
+        music_provider: str = "local",
+        jamendo_client_id: str = "",
     ) -> None:
         super().__init__(daemon=True, name="ShortsRunner")
         self.config = ShortsConfig(
@@ -65,6 +67,8 @@ class ShortsRunner(threading.Thread):
         self.output_base = output_base
         self._tts_provider = tts_provider
         self._tts_voice = tts_voice
+        self._music_provider = music_provider
+        self._jamendo_client_id = jamendo_client_id
         self._sensitive_keys: list[str] = sensitive_keys or []
         self._seed = seed if seed is not None else int(datetime.now().timestamp())
 
@@ -161,6 +165,8 @@ class ShortsRunner(threading.Thread):
             event_queue=self.event_queue,
             captions_enabled=self.config.captions_enabled,
             music_enabled=self.config.music_enabled,
+            music_provider=self._music_provider,
+            jamendo_client_id=self._jamendo_client_id,
         )
         if self._cancelled():
             return
