@@ -9,6 +9,7 @@ from docu_studio.shorts.capability_resolvers import (
     WordTiming,
     estimate_word_timestamps,
     get_word_timestamps,
+    resolve_beat_grid,
 )
 
 
@@ -84,3 +85,51 @@ class TestGetWordTimestamps:
             ffmpeg_cls.return_value.get_duration.return_value = 3.0
             timestamps, tier = get_word_timestamps("audio.mp3", "hi there", tts)
         assert tier == "tier3_estimated"
+
+
+class TestResolveBeatGrid:
+    def test_uses_librosa_tier_when_it_succeeds(self) -> None:
+        with patch(
+            "docu_studio.shorts.shorts_beat_detection.detect_beats_librosa",
+            return_value=[0.5, 1.0, 1.5, 2.0],
+        ):
+            grid, tier = resolve_beat_grid("/track.mp3", bpm=None, duration=10.0)
+        assert tier == "librosa"
+        assert grid == [0.5, 1.0, 1.5, 2.0]
+
+    def test_falls_back_to_bpm_metadata_when_librosa_returns_none(self) -> None:
+        with patch(
+            "docu_studio.shorts.shorts_beat_detection.detect_beats_librosa",
+            return_value=None,
+        ):
+            grid, tier = resolve_beat_grid("/track.mp3", bpm=120, duration=2.0)
+        assert tier == "bpm_metadata"
+        # 120 BPM -> 0.5s interval; 2.0s duration -> beats at 0.0, 0.5, 1.0, 1.5, 2.0
+        assert grid == [0.0, 0.5, 1.0, 1.5, 2.0]
+
+    def test_falls_back_to_none_tier_when_no_bpm_and_librosa_fails(self) -> None:
+        with patch(
+            "docu_studio.shorts.shorts_beat_detection.detect_beats_librosa",
+            return_value=None,
+        ):
+            grid, tier = resolve_beat_grid("/track.mp3", bpm=None, duration=10.0)
+        assert tier == "none"
+        assert grid is None
+
+    def test_bpm_of_zero_or_negative_is_treated_as_absent(self) -> None:
+        with patch(
+            "docu_studio.shorts.shorts_beat_detection.detect_beats_librosa",
+            return_value=None,
+        ):
+            grid, tier = resolve_beat_grid("/track.mp3", bpm=0, duration=10.0)
+        assert tier == "none"
+        assert grid is None
+
+    def test_librosa_exception_falls_through_to_bpm_tier(self) -> None:
+        with patch(
+            "docu_studio.shorts.shorts_beat_detection.detect_beats_librosa",
+            side_effect=RuntimeError("boom"),
+        ):
+            grid, tier = resolve_beat_grid("/track.mp3", bpm=100, duration=1.2)
+        assert tier == "bpm_metadata"
+        assert grid is not None

@@ -91,3 +91,41 @@ def get_word_timestamps(
     duration = FFmpegWrapper().get_duration(audio_path)
     _log.info("get_word_timestamps: using Tier 3 (estimated timing)")
     return estimate_word_timestamps(script_text, duration), "tier3_estimated"
+
+
+def _tier_b_bpm_grid(bpm: int | None, duration: float) -> list[float] | None:
+    if not bpm or bpm <= 0 or duration <= 0:
+        return None
+    interval = 60.0 / bpm
+    times: list[float] = []
+    t = 0.0
+    while t <= duration:
+        times.append(round(t, 2))
+        t += interval
+    return times if len(times) >= 2 else None
+
+
+def resolve_beat_grid(
+    track_path: str, bpm: int | None, duration: float
+) -> tuple[list[float] | None, str]:
+    """Return (beat_times, tier) for *track_path*: Tier A is librosa beat
+    detection on the audio itself; Tier B is a fixed grid derived from
+    *bpm* (the resolved TrackCandidate's bpm or the local manifest's bpm);
+    Tier C is no grid at all, meaning callers should leave cuts unchanged."""
+    try:
+        from docu_studio.shorts.shorts_beat_detection import detect_beats_librosa
+        grid = detect_beats_librosa(track_path)
+    except Exception as exc:
+        _log.info("resolve_beat_grid: librosa tier raised (%s) — trying bpm tier", exc)
+        grid = None
+    if grid is not None:
+        _log.info("resolve_beat_grid: using librosa beat detection (%d beats)", len(grid))
+        return grid, "librosa"
+
+    grid = _tier_b_bpm_grid(bpm, duration)
+    if grid is not None:
+        _log.info("resolve_beat_grid: using BPM-metadata grid (bpm=%s, %d beats)", bpm, len(grid))
+        return grid, "bpm_metadata"
+
+    _log.info("resolve_beat_grid: no beat grid available — cuts unchanged")
+    return None, "none"
