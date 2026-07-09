@@ -146,11 +146,13 @@ def resolve_music_track(
     max_duration: float,
     jamendo_client_id: str = "",
     seed: int = 0,
-) -> tuple[str, str] | None:
+) -> tuple[str, str, int | None] | None:
     """Resolve a local, playable music file for *mood*, honoring the
-    provider -> local -> none fallback chain. Returns (local_path, label),
-    or None if no provider produced a usable track — callers must skip the
-    music bed gracefully in that case."""
+    provider -> local -> none fallback chain. Returns (local_path, label,
+    bpm), or None if no provider produced a usable track — callers must
+    skip the music bed gracefully in that case. bpm is the resolved
+    TrackCandidate's bpm (populated for local-manifest tracks, always None
+    for Jamendo)."""
     if provider_name == "jamendo":
         jamendo = JamendoMusicProvider(jamendo_client_id)
         candidates = jamendo.search(mood, max_duration)
@@ -158,7 +160,7 @@ def resolve_music_track(
             try:
                 path = jamendo.fetch(candidates[0])
                 _log.info("Music: using Jamendo track %r", candidates[0].title)
-                return path, candidates[0].title
+                return path, candidates[0].title, candidates[0].bpm
             except Exception as exc:
                 _log.warning("Jamendo: download failed (%s) — falling back to local", exc)
         else:
@@ -169,7 +171,7 @@ def resolve_music_track(
     if candidates:
         path = local.fetch(candidates[0])
         _log.info("Music: using local track %r", candidates[0].title)
-        return path, candidates[0].title
+        return path, candidates[0].title, candidates[0].bpm
 
     _log.info("Music: no usable track from any provider — skipping music bed")
     return None

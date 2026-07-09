@@ -228,7 +228,7 @@ def assemble_short(
                     level=LogLevel.INFO,
                 ))
             else:
-                music_path, track_label = resolved
+                music_path, track_label, _track_bpm = resolved
                 mixed_audio = str(scene_dir / "audio_mixed.m4a")
                 ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio)
                 audio_for_mux = mixed_audio

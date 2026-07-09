@@ -141,7 +141,7 @@ class TestResolveMusicTrackFallbackChain:
                         jamendo_client_id="fake-id",
                     )
         local_search.assert_not_called()
-        assert result == ("/cache/epic.mp3", "Epic Battle Theme")
+        assert result == ("/cache/epic.mp3", "Epic Battle Theme", None)
 
     def test_falls_back_to_local_when_jamendo_search_fails(self) -> None:
         local_track = MusicTrack(filename="calm.mp3", mood="calm", bpm=90)
@@ -155,8 +155,9 @@ class TestResolveMusicTrackFallbackChain:
                     jamendo_client_id="fake-id",
                 )
         assert result is not None
-        path, label = result
+        path, label, bpm = result
         assert path.endswith("calm.mp3")
+        assert bpm == 90
 
     def test_falls_back_to_local_when_jamendo_fetch_raises(self) -> None:
         local_track = MusicTrack(filename="calm.mp3", mood="calm", bpm=90)
@@ -178,6 +179,7 @@ class TestResolveMusicTrackFallbackChain:
                     )
         assert result is not None
         assert result[0].endswith("calm.mp3")
+        assert result[2] == 90
 
     def test_returns_none_when_nothing_available_anywhere(self) -> None:
         with patch.object(JamendoMusicProvider, "search", return_value=[]):
@@ -201,3 +203,4 @@ class TestResolveMusicTrackFallbackChain:
         jamendo_search.assert_not_called()
         assert result is not None
         assert result[0].endswith("calm.mp3")
+        assert result[2] == 90
