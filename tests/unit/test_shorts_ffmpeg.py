@@ -2,6 +2,7 @@
 no real ffmpeg required, matching test_ffmpeg_wrapper.py's convention."""
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +17,40 @@ def wrapper() -> ShortsFFmpeg:
         with patch("docu_studio.media.ffmpeg_wrapper.platform_layer") as mock_pl:
             mock_pl.ffprobe_exe.return_value = "/fake/ffprobe"
             return ShortsFFmpeg()
+
+
+class TestDetectMotionWindow:
+    def test_analysis_command_limits_duration_and_fps(self, wrapper: ShortsFFmpeg) -> None:
+        # Real-run regression: without a duration/fps cap, motion detection
+        # timed out on 10 of 12 clips and silently fell back every time.
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.detect_motion_window("/clip.mp4", 45.0, 3.0)
+
+        args, kwargs = mock_run.call_args
+        cmd = args[0]
+        assert "-t" in cmd
+        assert cmd[cmd.index("-t") + 1] == "30.0"
+        assert cmd.index("-t") < cmd.index("-i")
+
+        vf_value = cmd[cmd.index("-vf") + 1]
+        assert "fps=5" in vf_value
+        assert "scale=160:-1" in vf_value
+
+        assert kwargs["timeout"] == 20.0
+
+    def test_falls_back_when_no_scene_markers_found(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            start, method = wrapper.detect_motion_window("/clip.mp4", 45.0, 3.0)
+        assert method == "fallback"
+        assert start == min(round(45.0 * 0.4, 2), 45.0 - 3.0)
+
+    def test_falls_back_on_timeout(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="ffmpeg", timeout=20.0)):
+            start, method = wrapper.detect_motion_window("/clip.mp4", 45.0, 3.0)
+        assert method == "fallback"
+        assert start == min(round(45.0 * 0.4, 2), 45.0 - 3.0)
 
 
 class TestBurnCaptions:

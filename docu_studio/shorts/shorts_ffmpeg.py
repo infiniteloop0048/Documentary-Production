@@ -15,7 +15,12 @@ from docu_studio.media.ffmpeg_wrapper import FFmpegWrapper
 _log = logging.getLogger(__name__)
 
 _MOTION_SAMPLE_WIDTH = 160
-_MOTION_DETECT_TIMEOUT = 10.0
+# Analysis only needs to see the first slice of the source — most stock clips
+# have their best motion well inside this, and capping it keeps long/high-fps
+# sources from blowing the analysis budget.
+_MOTION_ANALYSIS_MAX_DURATION = 30.0
+_MOTION_ANALYSIS_FPS = 5
+_MOTION_DETECT_TIMEOUT = 20.0
 # 40% into the clip — inside the spec's required 20-60% fallback band.
 _FALLBACK_WINDOW_FRACTION = 0.4
 
@@ -32,8 +37,12 @@ class ShortsFFmpeg(FFmpegWrapper):
         """Return (start_time, method) for the *window*-second slice of *clip_path*
         with the highest motion, sampled at low resolution via scene-change scores.
 
-        Falls back to a window starting 40% into the clip (within the spec's 20-60%
-        band) on any ffmpeg error or if analysis exceeds _MOTION_DETECT_TIMEOUT seconds.
+        Analysis is capped to the first _MOTION_ANALYSIS_MAX_DURATION seconds of the
+        source (via -t before -i) and to _MOTION_ANALYSIS_FPS, on top of the 160px
+        downscale, so typical 15-60s stock clips finish comfortably inside the
+        timeout instead of exhausting it. Falls back to a window starting 40% into
+        the clip (within the spec's 20-60% band) on any ffmpeg error or if analysis
+        still exceeds _MOTION_DETECT_TIMEOUT seconds.
         """
         usable = max(0.0, clip_duration - window)
         if usable <= 0:
@@ -41,9 +50,10 @@ class ShortsFFmpeg(FFmpegWrapper):
         try:
             cmd = [
                 self._ffmpeg, "-y",
+                "-t", str(_MOTION_ANALYSIS_MAX_DURATION),
                 "-i", clip_path,
                 "-vf", (
-                    f"scale={_MOTION_SAMPLE_WIDTH}:-1,"
+                    f"fps={_MOTION_ANALYSIS_FPS},scale={_MOTION_SAMPLE_WIDTH}:-1,"
                     "select='gt(scene\\,0.1)',metadata=print"
                 ),
                 "-an", "-f", "null", "-",
