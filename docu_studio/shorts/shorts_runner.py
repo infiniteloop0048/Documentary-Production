@@ -3,13 +3,13 @@
 Mirrors docu_studio.pipeline.runner.PipelineRunner's public shape (event_queue,
 cancel_event, _final_video_path, _project_folder, run()) so the existing
 Bridge._translate_events() works unmodified for both run types. Does not import
-from pipeline.runner — a plain queue.Queue is used here rather than PipelineRunner's
-private _TeeQueue log-teeing helper, since per-run pipeline_log.txt teeing is not
-required for Shorts by this task; project folder + history integration are reused.
+from pipeline.runner — ShortsTeeQueue (shorts_log.py) is a parallel
+implementation of pipeline.runner._TeeQueue used here for per-run
+shorts_log.txt teeing; project folder + history integration are reused.
 """
 from __future__ import annotations
 
-import queue
+import logging
 import threading
 from datetime import datetime
 from enum import Enum
@@ -25,6 +25,7 @@ from docu_studio.shorts.capability_resolvers import get_word_timestamps
 from docu_studio.shorts.shorts_assembly import assemble_short
 from docu_studio.shorts.shorts_config import ShortsConfig
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
+from docu_studio.shorts.shorts_log import QueueLoggingHandler, ShortsTeeQueue
 from docu_studio.shorts.shorts_script_gen import generate_shorts_script
 
 
@@ -43,11 +44,18 @@ class ShortsRunner(threading.Thread):
         tts: TTSProvider,
         footage_providers: list[FootageProvider],
         output_base: Path,
+        captions_enabled: bool = True,
+        music_enabled: bool = True,
         sensitive_keys: list[str] | None = None,
         seed: int | None = None,
     ) -> None:
         super().__init__(daemon=True, name="ShortsRunner")
-        self.config = ShortsConfig(topic=topic, duration_seconds=duration_seconds)
+        self.config = ShortsConfig(
+            topic=topic,
+            duration_seconds=duration_seconds,
+            captions_enabled=captions_enabled,
+            music_enabled=music_enabled,
+        )
         self.llm = llm
         self.tts = tts
         self.footage_providers = footage_providers
@@ -55,7 +63,7 @@ class ShortsRunner(threading.Thread):
         self._sensitive_keys: list[str] = sensitive_keys or []
         self._seed = seed if seed is not None else int(datetime.now().timestamp())
 
-        self.event_queue: queue.Queue = queue.Queue()
+        self.event_queue: ShortsTeeQueue = ShortsTeeQueue()
         self.cancel_event = threading.Event()
 
         self._status = ShortsRunStatus.FAILED
@@ -64,13 +72,21 @@ class ShortsRunner(threading.Thread):
         self._started_at = datetime.now()
 
     def run(self) -> None:
+        shorts_logger = logging.getLogger("docu_studio.shorts")
+        handler = QueueLoggingHandler(self.event_queue)
+        prev_level = shorts_logger.level
+        shorts_logger.addHandler(handler)
+        shorts_logger.setLevel(logging.INFO)
         try:
             self._execute()
         except Exception as exc:
             self.event_queue.put(ErrorEvent(message=str(exc), fatal=True))
             self._status = ShortsRunStatus.FAILED
         finally:
+            shorts_logger.removeHandler(handler)
+            shorts_logger.setLevel(prev_level)
             self._save_history()
+            self.event_queue.close_log()  # flush log before sentinel
             self.event_queue.put(None)
 
     def _execute(self) -> None:
@@ -78,6 +94,9 @@ class ShortsRunner(threading.Thread):
             return
         self._project_folder = create_project_folder(
             self.config.topic, self._started_at, self.output_base
+        )
+        self.event_queue.open_log(
+            self._project_folder / "shorts_log.txt", self._sensitive_keys
         )
         ffmpeg = ShortsFFmpeg()
 
@@ -94,13 +113,16 @@ class ShortsRunner(threading.Thread):
         if self._cancelled():
             return
 
-        self.event_queue.put(ProgressEvent(stage="Short Audio", message="Synthesizing voiceover…"))
+        self.event_queue.put(ProgressEvent(stage="Short TTS", message="Synthesizing voiceover…"))
         audio_path = str(self._project_folder / "audio" / "short.mp3")
         audio_duration = self.tts.synthesize(script.text, audio_path)
         self.event_queue.put(LogEvent(message=f"Voiceover: {audio_duration:.2f}s", level=LogLevel.INFO))
         if self._cancelled():
             return
 
+        self.event_queue.put(ProgressEvent(
+            stage="Short Alignment", message="Resolving word-level timing…",
+        ))
         timestamps, tier_used = get_word_timestamps(audio_path, script.text, self.tts)
         self.event_queue.put(LogEvent(message=f"Word timing resolver: {tier_used}", level=LogLevel.INFO))
         if self._cancelled():
@@ -119,6 +141,8 @@ class ShortsRunner(threading.Thread):
             output_path=output_path,
             seed=self._seed,
             event_queue=self.event_queue,
+            captions_enabled=self.config.captions_enabled,
+            music_enabled=self.config.music_enabled,
         )
         if self._cancelled():
             return
