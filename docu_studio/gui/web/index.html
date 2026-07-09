@@ -140,7 +140,7 @@
   </style>
 </head>
 <body class="bg-app text-white font-sans">
-<div style="position:fixed;top:0;right:0;background:red;color:white;z-index:9999;padding:4px">v4</div>
+<div style="position:fixed;top:0;right:0;background:red;color:white;z-index:9999;padding:4px">v5</div>
 <div class="bg-orbs" aria-hidden="true">
   <div class="orb orb-a"></div>
   <div class="orb orb-b"></div>
@@ -278,6 +278,41 @@
           </div>
           <input id="music-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
         </div>
+
+        <!-- Advanced toggles (short/reel) -->
+        <details id="advanced-row" class="mt-4" style="display:none">
+          <summary class="text-sm font-medium text-dim cursor-pointer select-none">Advanced</summary>
+          <div class="mt-3 space-y-4 pl-1">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-dim block">Beat-synced cuts</label>
+                <p class="text-xs text-faint mt-0.5">Snap cut points to the music's beat grid, when a track resolves.</p>
+              </div>
+              <input id="beat-sync-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+            </div>
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-dim block">Speed ramping</label>
+                <p class="text-xs text-faint mt-0.5">Speed up slow, static segments to add energy.</p>
+              </div>
+              <input id="speed-ramp-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+            </div>
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-dim block">Text-punch frames</label>
+                <p class="text-xs text-faint mt-0.5">Full-frame stat card for the script's single most striking line.</p>
+              </div>
+              <input id="punch-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+            </div>
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-dim block">Loop revisit</label>
+                <p class="text-xs text-faint mt-0.5">Replay a moment from the first clip in the final seconds.</p>
+              </div>
+              <input id="loop-revisit-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+            </div>
+          </div>
+        </details>
 
         <!-- Start button -->
         <button id="start-run-btn" onclick="startRun()"

@@ -208,6 +208,7 @@ function startConfig(mode) {
   _q('aspect-row').style.display = mode === 'short' ? '' : 'none';
   _q('captions-row').style.display = mode === 'short' ? '' : 'none';
   _q('music-row').style.display = mode === 'short' ? '' : 'none';
+  _q('advanced-row').style.display = mode === 'short' ? '' : 'none';
   showScreen('config');
 }
 
@@ -246,6 +247,10 @@ async function startRun() {
       topic, duration_seconds: secs,
       captions_enabled: _q('captions-toggle').checked,
       music_enabled: _q('music-toggle').checked,
+      beat_sync_enabled: _q('beat-sync-toggle').checked,
+      speed_ramp_enabled: _q('speed-ramp-toggle').checked,
+      punch_enabled: _q('punch-toggle').checked,
+      loop_revisit_enabled: _q('loop-revisit-toggle').checked,
     });
     if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
     return;
