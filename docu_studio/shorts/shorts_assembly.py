@@ -18,6 +18,8 @@ from docu_studio.shorts.shorts_cuts import (
     choose_crop_strategy,
     plan_cuts,
 )
+from docu_studio.shorts.music_library import MUSIC_DIR, select_music_track
+from docu_studio.shorts.shorts_captions import write_ass_file
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_script_gen import ShortsScript
 
@@ -134,6 +136,8 @@ def assemble_short(
     output_path: Path,
     seed: int,
     event_queue: queue.Queue,
+    captions_enabled: bool = True,
+    music_enabled: bool = True,
 ) -> None:
     """Build the final vertical short: fetch footage, plan cuts, window/convert/
     Ken-Burns each segment, concat, and mux with the TTS audio track."""
@@ -185,10 +189,53 @@ def assemble_short(
 
         segment_paths.append(kenburns)
 
-    event_queue.put(ProgressEvent(stage="Short Mux", message="Concatenating and muxing final short…"))
     concat_path = str(scene_dir / "short_concat.mp4")
     ffmpeg.concat_segments_video_only(segment_paths, concat_path)
-    ffmpeg.mux_shorts_audio(concat_path, audio_path, str(output_path))
+
+    event_queue.put(ProgressEvent(
+        stage="Short Captions & Music", message="Adding captions and music bed…",
+    ))
+    video_for_mux = concat_path
+    if captions_enabled:
+        try:
+            ass_path = str(scene_dir / "captions.ass")
+            write_ass_file(timestamps, ass_path)
+            captioned_path = str(scene_dir / "short_captioned.mp4")
+            ffmpeg.burn_captions(video_for_mux, ass_path, captioned_path)
+            video_for_mux = captioned_path
+            event_queue.put(LogEvent(message="Captions burned in.", level=LogLevel.INFO))
+        except Exception as exc:
+            event_queue.put(LogEvent(
+                message=f"Captions failed ({exc}) — continuing without captions.",
+                level=LogLevel.WARNING,
+            ))
+
+    audio_for_mux = audio_path
+    if music_enabled:
+        try:
+            track = select_music_track(seed=seed)
+            if track is None:
+                event_queue.put(LogEvent(
+                    message="No usable music track found — skipping music bed.",
+                    level=LogLevel.INFO,
+                ))
+            else:
+                music_path = str(MUSIC_DIR / track.filename)
+                mixed_audio = str(scene_dir / "audio_mixed.m4a")
+                ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio)
+                audio_for_mux = mixed_audio
+                event_queue.put(LogEvent(
+                    message=f"Music bed mixed in ({track.mood}, {track.bpm} BPM).",
+                    level=LogLevel.INFO,
+                ))
+        except Exception as exc:
+            event_queue.put(LogEvent(
+                message=f"Music mixing failed ({exc}) — continuing without music.",
+                level=LogLevel.WARNING,
+            ))
+
+    event_queue.put(ProgressEvent(stage="Short Mux", message="Muxing final short…"))
+    ffmpeg.mux_shorts_audio(video_for_mux, audio_for_mux, str(output_path))
 
     event_queue.put(LogEvent(
         message=f"Short assembled: {len(segments)} segments → {output_path}",
