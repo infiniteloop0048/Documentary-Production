@@ -199,7 +199,7 @@ def assemble_short(
     if captions_enabled:
         try:
             ass_path = str(scene_dir / "captions.ass")
-            write_ass_file(timestamps, ass_path)
+            write_ass_file(timestamps, ass_path, audio_duration=audio_duration)
             captioned_path = str(scene_dir / "short_captioned.mp4")
             ffmpeg.burn_captions(video_for_mux, ass_path, captioned_path)
             video_for_mux = captioned_path

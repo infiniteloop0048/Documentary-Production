@@ -91,7 +91,7 @@ def _render_group_text(group: list[WordTiming], active_index: int) -> str:
         word_text = _escape_ass_text(w.word)
         if idx == active_index:
             parts.append(
-                r"{\t(0,120,\fscx118\fscy118)\t(120,240,\fscx100\fscy100)\b1}"
+                r"{\t(0,60,\fscx118\fscy118)\t(60,120,\fscx100\fscy100)\b1}"
                 + word_text + r"{\r}"
             )
         else:
@@ -99,25 +99,47 @@ def _render_group_text(group: list[WordTiming], active_index: int) -> str:
     return " ".join(parts)
 
 
-def generate_ass(timings: list[WordTiming]) -> str:
+def generate_ass(timings: list[WordTiming], audio_duration: float | None = None) -> str:
     """Build a full ASS subtitle document from word-level *timings*: words are
     grouped into 2-4 word "pop caption" chunks, the currently-spoken word in
     each chunk is bold and briefly scaled up via an ASS \\t transform, and
-    every line sits inside the lower-middle safe area."""
+    every line sits inside the lower-middle safe area.
+
+    Events are gapless: each word's Start stays at its own whisper timestamp,
+    but its End is pinned to the *next* word's Start (across group boundaries
+    too), so exactly one Dialogue event is ever active — no flicker between
+    words and no double-blink at group swaps. The very last word's End uses
+    *audio_duration* when given, else falls back to its own whisper end.
+    """
     header = _ASS_HEADER_TEMPLATE.format(
         width=SHORTS_WIDTH, height=SHORTS_HEIGHT,
         font=_FONT_NAME, margin_v=SAFE_AREA_BOTTOM_MARGIN,
     )
     lines = [header]
-    for group in group_words(timings):
-        for active_index, word in enumerate(group):
-            start = _format_ass_time(word.start)
-            end_seconds = max(word.end, word.start + _MIN_WORD_DURATION)
-            end = _format_ass_time(end_seconds)
-            text = _render_group_text(group, active_index)
-            lines.append(f"Dialogue: 0,{start},{end},Pop,,0,0,0,,{text}")
+    groups = group_words(timings)
+    flat: list[tuple[list[WordTiming], int, WordTiming]] = [
+        (group, active_index, word)
+        for group in groups
+        for active_index, word in enumerate(group)
+    ]
+    for i, (group, active_index, word) in enumerate(flat):
+        start = word.start
+        if i + 1 < len(flat):
+            next_start = flat[i + 1][2].start
+        elif audio_duration is not None:
+            next_start = audio_duration
+        else:
+            next_start = word.end
+        end_seconds = max(next_start, start + _MIN_WORD_DURATION)
+        text = _render_group_text(group, active_index)
+        lines.append(
+            f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end_seconds)},"
+            f"Pop,,0,0,0,,{text}"
+        )
     return "\n".join(lines) + "\n"
 
 
-def write_ass_file(timings: list[WordTiming], output_path: str) -> None:
-    Path(output_path).write_text(generate_ass(timings), encoding="utf-8")
+def write_ass_file(
+    timings: list[WordTiming], output_path: str, audio_duration: float | None = None
+) -> None:
+    Path(output_path).write_text(generate_ass(timings, audio_duration), encoding="utf-8")
