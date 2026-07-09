@@ -6,6 +6,7 @@ _check() error-raising helper — the base class is never edited, only extended.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 
@@ -157,6 +158,59 @@ class ShortsFFmpeg(FFmpegWrapper):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         self._check(result, f"concat_segments_video_only → {output_path!r}")
+
+    def burn_captions(self, input_path: str, ass_path: str, output_path: str) -> None:
+        """Burn *ass_path* (ASS pop-caption subtitles) into *input_path* via
+        ffmpeg's subtitles filter. *input_path* here is the video-only concat
+        output — no audio stream to preserve at this stage.
+
+        ffmpeg's -vf value is parsed by the avfilter graph description parser,
+        which splits on unescaped ':' — this breaks on any colon in the path
+        (guaranteed on Windows drive letters like "C:\\...", and no universal
+        escaping of the colon reliably survives both that parser AND avio's
+        own protocol-scheme detection, which independently misreads a bare
+        "C:" prefix as a "C" protocol). Sidestepping both entirely: run ffmpeg
+        with cwd set to the subtitle file's own directory and reference only
+        its bare filename (never containing a colon) in the filter string.
+        input_path/output_path are unaffected — they're plain argv values,
+        not filtergraph-string content, so they still take absolute paths.
+        """
+        ass_dir = os.path.dirname(ass_path) or "."
+        ass_name = os.path.basename(ass_path)
+        cmd = [
+            self._ffmpeg, "-y",
+            "-i", os.path.abspath(input_path),
+            "-vf", f"subtitles={ass_name}",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "22",
+            os.path.abspath(output_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=ass_dir)
+        self._check(result, f"burn_captions → {output_path!r}")
+
+    def mix_music_bed(
+        self, voice_path: str, music_path: str, video_duration: float, output_path: str
+    ) -> None:
+        """Loop/trim *music_path* to *video_duration*, duck it under
+        *voice_path* via sidechaincompress, and write the mixed result to
+        *output_path* as a standalone audio file — the caller (assemble_short)
+        passes this into mux_shorts_audio exactly as it would the raw voice
+        track, so that method's -map discipline never needs to change."""
+        from docu_studio.shorts.shorts_audio_mix import build_ducking_filtergraph
+
+        filter_complex = build_ducking_filtergraph(video_duration)
+        cmd = [
+            self._ffmpeg, "-y",
+            "-i", voice_path,
+            "-stream_loop", "-1", "-i", music_path,
+            "-filter_complex", filter_complex,
+            "-map", "[aout]",
+            "-c:a", "aac",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        self._check(result, f"mix_music_bed → {output_path!r}")
 
     def mux_shorts_audio(self, video_path: str, audio_path: str, output_path: str) -> None:
         """Mux the concatenated vertical video with the TTS audio track.
