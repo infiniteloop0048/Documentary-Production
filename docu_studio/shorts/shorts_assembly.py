@@ -33,6 +33,11 @@ _MIN_CLIPS = 6
 # can land on the final one.
 _MIN_CLIP_DURATION = MIN_SEGMENT_DURATION + MAX_SEGMENT_DURATION
 
+_SLOW_CLIP_MIN_SOURCE_DURATION = 15.0
+SPEED_RAMP_FACTOR = 1.35
+_MIN_SPEED_FACTOR = 1.25
+_LOOP_REVISIT_MIN_GAP = 1.0
+
 
 def _search_dedup(
     providers: list[FootageProvider], queries: list[str], min_duration: float,
@@ -122,6 +127,93 @@ def _snap_to_sentences(segments: list[Segment], sentence_starts: list[float]) ->
         nearest = min(sentence_starts, key=lambda t: abs(t - seg.start))
         snapped.append(Segment(index=seg.index, start=nearest, duration=seg.duration, clip_index=seg.clip_index))
     return snapped
+
+
+def _build_segment(
+    seg: Segment,
+    clip: dict,
+    ffmpeg: ShortsFFmpeg,
+    scene_dir: Path,
+    speed_ramp_enabled: bool,
+    sped_count: int,
+    max_sped_segments: int,
+    avoid_start: float | None = None,
+) -> tuple[str, int, float]:
+    """Build one footage segment: window/trim (+ optional speed ramp for a
+    slow, long-source clip) -> vertical convert -> Ken Burns.
+
+    *avoid_start* is set only for the loop-revisit segment: when given, and
+    the source clip is long enough to offer a distinct window, the motion-
+    detected start is swapped for a window from the opposite end of the
+    clip so the revisit doesn't just replay the exact same window as the
+    original first segment. Otherwise (source too short) the same window
+    is kept, per spec.
+
+    Returns (kenburns_output_path, updated_sped_count, window_start_used).
+    """
+    raw_duration = ffmpeg.get_duration(clip["path"])
+    window = min(seg.duration, raw_duration)
+    start, method = ffmpeg.detect_motion_window(clip["path"], raw_duration, window)
+    _log.info(
+        "Segment %d: clip=%s window_method=%s start=%.2f",
+        seg.index, clip["path"], method, start,
+    )
+
+    if avoid_start is not None and raw_duration - window >= _LOOP_REVISIT_MIN_GAP:
+        alt_start = max(0.0, raw_duration - window)
+        if abs(alt_start - avoid_start) >= _LOOP_REVISIT_MIN_GAP:
+            start = alt_start
+            method = "loop_revisit_alt_window"
+            _log.info("Segment %d: loop-revisit using alternate window start=%.2f", seg.index, start)
+
+    is_slow_candidate = method == "fallback" and raw_duration >= _SLOW_CLIP_MIN_SOURCE_DURATION
+    apply_speed = (
+        speed_ramp_enabled and is_slow_candidate
+        and not seg.loop_revisit and sped_count < max_sped_segments
+    )
+    if apply_speed:
+        source_trim = min(seg.duration * SPEED_RAMP_FACTOR, max(0.0, raw_duration - start))
+        if source_trim < seg.duration * _MIN_SPEED_FACTOR:
+            apply_speed = False  # not enough source to speed ramp meaningfully
+
+    if apply_speed:
+        trim_duration = source_trim
+        output_duration = seg.duration
+    else:
+        trim_duration = min(seg.duration, max(0.0, raw_duration - start))
+        output_duration = trim_duration
+        if trim_duration < seg.duration:
+            _log.warning(
+                "Segment %d: clip %s only has %.2fs remaining from start=%.2f, "
+                "needed %.2fs (shortfall %.2fs)",
+                seg.index, clip["path"], trim_duration, start, seg.duration,
+                seg.duration - trim_duration,
+            )
+
+    windowed = str(scene_dir / f"seg_{seg.index:03d}_window.mp4")
+    ffmpeg.trim_clip(clip["path"], start, trim_duration, windowed)
+
+    if apply_speed:
+        actual_factor = trim_duration / seg.duration
+        sped = str(scene_dir / f"seg_{seg.index:03d}_sped.mp4")
+        ffmpeg.apply_speed_ramp(windowed, sped, actual_factor)
+        windowed = sped
+        sped_count += 1
+        _log.info("Segment %d: sped up (factor=%.2f)", seg.index, actual_factor)
+    else:
+        _log.info("Segment %d: not sped up", seg.index)
+
+    strategy = choose_crop_strategy(clip["width"], clip["height"])
+    vertical = str(scene_dir / f"seg_{seg.index:03d}_vertical.mp4")
+    ffmpeg.vertical_convert(windowed, vertical, strategy)
+    _log.info("Segment %d: crop_strategy=%s", seg.index, strategy)
+
+    direction = "in" if seg.index % 2 == 0 else "out"
+    pan = seg.index % 3 == 0
+    kenburns = str(scene_dir / f"seg_{seg.index:03d}_kb.mp4")
+    ffmpeg.apply_ken_burns(vertical, kenburns, output_duration, direction, pan)
+
+    return kenburns, sped_count, start
 
 
 def assemble_short(
