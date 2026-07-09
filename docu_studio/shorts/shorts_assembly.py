@@ -128,7 +128,10 @@ def _snap_to_sentences(segments: list[Segment], sentence_starts: list[float]) ->
     snapped = []
     for seg in segments:
         nearest = min(sentence_starts, key=lambda t: abs(t - seg.start))
-        snapped.append(Segment(index=seg.index, start=nearest, duration=seg.duration, clip_index=seg.clip_index))
+        snapped.append(Segment(
+            index=seg.index, start=nearest, duration=seg.duration, clip_index=seg.clip_index,
+            loop_revisit=seg.loop_revisit, is_punch=seg.is_punch, punch_text=seg.punch_text,
+        ))
     return snapped
 
 
@@ -367,13 +370,23 @@ def assemble_short(
         segments = _snap_to_sentences(segments, _sentence_start_times(script, timestamps))
 
     punch_window: tuple[float, float] | None = None
+    # (segment_index, rendered_path) of a punch card already rendered here, at plan-
+    # commit time — so the assembly loop below just reuses the file instead of
+    # re-rendering (and risking a second, later, unrecoverable failure that would
+    # truncate the final narration audio; see Task 12 review Finding 3).
+    prerendered_punch: tuple[int, str] | None = None
     if punch_enabled and script.punch is not None:
         try:
             sentence_starts = _sentence_start_times(script, timestamps)
             new_segments, window = _insert_punch_card(segments, script.punch, sentence_starts)
             if window is not None:
+                punch_index = next(i for i, s in enumerate(new_segments) if s.is_punch)
+                punch_duration = window[1] - window[0]
+                rendered_path = str(scene_dir / f"seg_{punch_index:03d}_punch.mp4")
+                ffmpeg.generate_punch_card(rendered_path, script.punch[1], punch_duration)
                 segments = new_segments
                 punch_window = window
+                prerendered_punch = (punch_index, rendered_path)
                 event_queue.put(LogEvent(
                     message=f"Punch card inserted: {script.punch[1]!r} at {window[0]:.2f}s",
                     level=LogLevel.INFO,
@@ -397,20 +410,31 @@ def assemble_short(
     first_window_start: float | None = None
     for seg in segments:
         if seg.is_punch:
-            path = str(scene_dir / f"seg_{seg.index:03d}_punch.mp4")
-            try:
-                ffmpeg.generate_punch_card(path, seg.punch_text or "", seg.duration)
-                segment_paths.append(path)
-                _log.info("Segment %d: punch card %r", seg.index, seg.punch_text)
-            except Exception as exc:
-                _log.warning("Segment %d: punch card render failed (%s) — dropping card", seg.index, exc)
+            if prerendered_punch is not None and prerendered_punch[0] == seg.index:
+                segment_paths.append(prerendered_punch[1])
+                _log.info("Segment %d: using pre-rendered punch card %r", seg.index, seg.punch_text)
+            else:
+                _log.warning(
+                    "Segment %d: punch card flagged but no pre-rendered file available — dropping",
+                    seg.index,
+                )
             continue
         clip = clips[seg.clip_index]
         avoid_start = first_window_start if seg.loop_revisit else None
-        path, sped_count, window_start = _build_segment(
-            seg, clip, ffmpeg, scene_dir, speed_ramp_enabled, sped_count, max_sped_segments,
-            avoid_start=avoid_start,
-        )
+        try:
+            path, sped_count, window_start = _build_segment(
+                seg, clip, ffmpeg, scene_dir, speed_ramp_enabled, sped_count, max_sped_segments,
+                avoid_start=avoid_start,
+            )
+        except Exception as exc:
+            _log.warning(
+                "Segment %d: build with speed-ramp/loop-revisit failed (%s) — retrying plain",
+                seg.index, exc,
+            )
+            path, sped_count, window_start = _build_segment(
+                seg, clip, ffmpeg, scene_dir, False, sped_count, max_sped_segments,
+                avoid_start=None,
+            )
         if seg.index == 0:
             first_window_start = window_start
         segment_paths.append(path)
