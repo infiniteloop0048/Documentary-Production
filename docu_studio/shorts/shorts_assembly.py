@@ -37,6 +37,9 @@ _SLOW_CLIP_MIN_SOURCE_DURATION = 15.0
 SPEED_RAMP_FACTOR = 1.35
 _MIN_SPEED_FACTOR = 1.25
 _LOOP_REVISIT_MIN_GAP = 1.0
+PUNCH_CARD_DURATION_SECONDS = 1.0
+_PUNCH_CARD_MIN_DURATION = 0.8
+_MIN_PUNCH_REMAINDER = 0.3
 
 
 def _search_dedup(
@@ -214,6 +217,72 @@ def _build_segment(
     ffmpeg.apply_ken_burns(vertical, kenburns, output_duration, direction, pan)
 
     return kenburns, sped_count, start
+
+
+def _insert_punch_card(
+    segments: list[Segment],
+    punch: tuple[int, str],
+    sentence_starts: list[float],
+) -> tuple[list[Segment], tuple[float, float] | None]:
+    """Insert a punch-card Segment near *punch*'s sentence start, stealing
+    its duration from the nearest non-revisit footage segment so total
+    timeline length is unchanged. Returns (segments, (card_start, card_end))
+    on success, or (segments unchanged, None) if placement isn't possible
+    (out-of-range sentence index, no footage segments, or the nearest
+    segment is too short to steal PUNCH_CARD_DURATION_SECONDS from)."""
+    sentence_index, punch_text = punch
+    if sentence_index >= len(sentence_starts):
+        return segments, None
+    card_time = sentence_starts[sentence_index]
+
+    footage_segments = [s for s in segments if not s.loop_revisit]
+    if not footage_segments:
+        return segments, None
+    target = min(footage_segments, key=lambda s: abs(s.start - card_time))
+
+    card_duration = min(PUNCH_CARD_DURATION_SECONDS, target.duration - _MIN_PUNCH_REMAINDER)
+    if card_duration < _PUNCH_CARD_MIN_DURATION:
+        return segments, None  # target too short to steal a usable card from — skip
+
+    steal_from_start = target.index != 0
+    if steal_from_start:
+        card_start = target.start
+        new_target = Segment(
+            index=target.index, start=target.start + card_duration,
+            duration=target.duration - card_duration, clip_index=target.clip_index,
+        )
+    else:
+        card_start = target.start + target.duration - card_duration
+        new_target = Segment(
+            index=target.index, start=target.start,
+            duration=target.duration - card_duration, clip_index=target.clip_index,
+        )
+
+    card_segment = Segment(
+        index=target.index, start=card_start, duration=card_duration,
+        clip_index=0, is_punch=True, punch_text=punch_text,
+    )
+
+    new_segments: list[Segment] = []
+    for s in segments:
+        if s is target:
+            if steal_from_start:
+                new_segments.append(card_segment)
+                new_segments.append(new_target)
+            else:
+                new_segments.append(new_target)
+                new_segments.append(card_segment)
+        else:
+            new_segments.append(s)
+
+    reindexed = [
+        Segment(
+            index=i, start=s.start, duration=s.duration, clip_index=s.clip_index,
+            loop_revisit=s.loop_revisit, is_punch=s.is_punch, punch_text=s.punch_text,
+        )
+        for i, s in enumerate(new_segments)
+    ]
+    return reindexed, (card_start, card_start + card_duration)
 
 
 def assemble_short(

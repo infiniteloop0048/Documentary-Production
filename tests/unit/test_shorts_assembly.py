@@ -15,6 +15,7 @@ import pytest
 from docu_studio.shorts.shorts_assembly import (
     SPEED_RAMP_FACTOR,
     _build_segment,
+    _insert_punch_card,
 )
 from docu_studio.shorts.shorts_cuts import Segment
 
@@ -168,3 +169,92 @@ class TestBuildSegmentLoopRevisit:
         )
 
         assert window_start == 5.0
+
+
+def _plain_segments(*durations: float) -> list[Segment]:
+    segs = []
+    start = 0.0
+    for i, d in enumerate(durations):
+        segs.append(Segment(index=i, start=start, duration=d, clip_index=i))
+        start += d
+    return segs
+
+
+class TestInsertPunchCard:
+    def test_shrinks_adjacent_segment_and_preserves_total_duration(self) -> None:
+        segments = _plain_segments(3.0, 3.0, 3.0)
+        total_before = sum(s.duration for s in segments)
+
+        new_segments, window = _insert_punch_card(
+            segments, punch=(1, "90 PERCENT"), sentence_starts=[0.0, 3.0, 6.0],
+        )
+
+        assert window is not None
+        assert sum(s.duration for s in new_segments) == pytest.approx(total_before)
+
+    def test_card_segment_is_flagged_and_carries_text(self) -> None:
+        segments = _plain_segments(3.0, 3.0, 3.0)
+        new_segments, window = _insert_punch_card(
+            segments, punch=(1, "90 PERCENT"), sentence_starts=[0.0, 3.0, 6.0],
+        )
+        punch_segs = [s for s in new_segments if s.is_punch]
+        assert len(punch_segs) == 1
+        assert punch_segs[0].punch_text == "90 PERCENT"
+        assert punch_segs[0].duration == pytest.approx(window[1] - window[0])
+
+    def test_card_placed_before_target_when_not_the_first_segment(self) -> None:
+        segments = _plain_segments(3.0, 3.0, 3.0)
+        new_segments, window = _insert_punch_card(
+            segments, punch=(1, "90 PERCENT"), sentence_starts=[0.0, 3.0, 6.0],
+        )
+        card_index = next(i for i, s in enumerate(new_segments) if s.is_punch)
+        # the shrunk original target must immediately follow the card
+        assert not new_segments[card_index + 1].is_punch
+        assert new_segments[card_index + 1].start == pytest.approx(window[1])
+
+    def test_card_steals_from_the_end_when_target_is_first_segment(self) -> None:
+        segments = _plain_segments(3.0, 3.0, 3.0)
+        new_segments, window = _insert_punch_card(
+            segments, punch=(0, "90 PERCENT"), sentence_starts=[0.0, 3.0, 6.0],
+        )
+        assert window is not None
+        assert window[0] > 0.0  # card doesn't start at t=0
+        first = new_segments[0]
+        assert not first.is_punch
+        assert first.start == 0.0
+
+    def test_returns_unchanged_when_no_footage_segments(self) -> None:
+        segments = [Segment(index=0, start=28.0, duration=1.75, clip_index=0, loop_revisit=True)]
+        new_segments, window = _insert_punch_card(
+            segments, punch=(0, "90 PERCENT"), sentence_starts=[0.0],
+        )
+        assert window is None
+        assert new_segments == segments
+
+    def test_skips_gracefully_when_target_segment_too_short_to_steal_from(self) -> None:
+        segments = _plain_segments(0.4, 3.0)  # first segment too short for a 1.0s card
+        new_segments, window = _insert_punch_card(
+            segments, punch=(0, "90 PERCENT"), sentence_starts=[0.0, 0.4],
+        )
+        assert window is None
+        assert new_segments == segments
+
+    def test_sentence_index_out_of_range_returns_unchanged(self) -> None:
+        segments = _plain_segments(3.0, 3.0)
+        new_segments, window = _insert_punch_card(
+            segments, punch=(5, "90 PERCENT"), sentence_starts=[0.0, 3.0],
+        )
+        assert window is None
+        assert new_segments == segments
+
+    def test_loop_revisit_segment_is_never_chosen_as_the_target(self) -> None:
+        segments = [
+            Segment(index=0, start=0.0, duration=3.0, clip_index=0),
+            Segment(index=1, start=3.0, duration=1.75, clip_index=0, loop_revisit=True),
+        ]
+        # sentence start lands exactly on the revisit segment's start
+        new_segments, window = _insert_punch_card(
+            segments, punch=(0, "90 PERCENT"), sentence_starts=[3.0],
+        )
+        assert window is not None
+        assert window[1] <= 3.0  # card placed within the non-revisit segment only
