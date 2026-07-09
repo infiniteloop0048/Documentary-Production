@@ -174,3 +174,48 @@ class TestApplySpeedRamp:
         args = mock_run.call_args[0][0]
         assert args[args.index("-i") + 1] == "/clip_in.mp4"
         assert args[-1] == "/clip_out.mp4"
+
+
+class TestGeneratePunchCard:
+    def test_base_card_uses_lavfi_color_source_and_drawtext(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.generate_punch_card("/out/card.mp4", "90 PERCENT", 1.0)
+        first_cmd = mock_run.call_args_list[0][0][0]
+        assert "-f" in first_cmd and "lavfi" in first_cmd
+        vf = first_cmd[first_cmd.index("-vf") + 1]
+        assert "drawtext=" in vf
+        assert "90 PERCENT" in vf
+
+    def test_scale_in_pass_uses_zoompan_on_upscaled_base(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.generate_punch_card("/out/card.mp4", "90 PERCENT", 1.0)
+        second_cmd = mock_run.call_args_list[1][0][0]
+        vf = second_cmd[second_cmd.index("-vf") + 1]
+        assert "zoompan=" in vf
+        assert "scale=4320:-2" in vf
+        assert "lanczos" in vf
+        assert second_cmd[second_cmd.index("-i") + 1] == "/out/card.mp4.base.mp4"
+
+    def test_two_ffmpeg_calls_are_made(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.generate_punch_card("/out/card.mp4", "one million", 1.2)
+        assert mock_run.call_count == 2
+
+    def test_frame_count_matches_duration(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.generate_punch_card("/out/card.mp4", "text", 1.2)
+        second_cmd = mock_run.call_args_list[1][0][0]
+        vf = second_cmd[second_cmd.index("-vf") + 1]
+        assert "d=36" in vf  # 1.2s * 30fps
+
+    def test_single_quotes_in_text_are_escaped(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.generate_punch_card("/out/card.mp4", "IT'S HUGE", 1.0)
+        first_cmd = mock_run.call_args_list[0][0][0]
+        vf = first_cmd[first_cmd.index("-vf") + 1]
+        assert "IT\\'S HUGE" in vf

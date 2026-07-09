@@ -27,6 +27,10 @@ _FALLBACK_WINDOW_FRACTION = 0.4
 SHORTS_WIDTH = 1080
 SHORTS_HEIGHT = 1920
 
+_PUNCH_CARD_BG = "0x141620"
+# Scale-in completes over the first quarter of the card's own length.
+_PUNCH_SCALE_IN_FRACTION = 0.25
+
 
 class ShortsFFmpeg(FFmpegWrapper):
     """FFmpeg operations used only by the Shorts/Reels assembly path."""
@@ -179,6 +183,51 @@ class ShortsFFmpeg(FFmpegWrapper):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         self._check(result, f"apply_speed_ramp(factor={speed_factor}) → {output_path!r}")
+
+    def generate_punch_card(self, output_path: str, text: str, duration: float) -> None:
+        """Render a *duration*-second full-frame punch card: theme-dark
+        background, huge bold centered white text, with a quick zoompan
+        scale-in over the first _PUNCH_SCALE_IN_FRACTION of its length —
+        reusing apply_ken_burns' frame-linear zoompan recipe so the scale
+        lands exactly on the card's own frame count."""
+        escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+        fps = 30
+        frames = max(1, round(duration * fps))
+        scale_frames = max(1, round(frames * _PUNCH_SCALE_IN_FRACTION))
+        zoom_expr = f"if(lte(on\\,{scale_frames})\\,0.85+0.15*on/{scale_frames}\\,1.0)"
+
+        base_path = f"{output_path}.base.mp4"
+        base_cmd = [
+            self._ffmpeg, "-y",
+            "-f", "lavfi",
+            "-i", f"color=c={_PUNCH_CARD_BG}:s={SHORTS_WIDTH}x{SHORTS_HEIGHT}:d={duration}:r={fps}",
+            "-vf", (
+                f"drawtext=text='{escaped}':fontcolor=white:fontsize=120:"
+                "x=(w-text_w)/2:y=(h-text_h)/2:font=DejaVu Sans Bold"
+            ),
+            "-t", str(duration),
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            base_path,
+        ]
+        result = subprocess.run(base_cmd, capture_output=True, text=True)
+        self._check(result, f"generate_punch_card(base) → {base_path!r}")
+
+        upscale_dim = SHORTS_WIDTH * 4
+        vf = (
+            f"scale={upscale_dim}:-2:flags=lanczos,"
+            f"zoompan=z='{zoom_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"d={frames}:s={SHORTS_WIDTH}x{SHORTS_HEIGHT}:fps={fps}"
+        )
+        cmd = [
+            self._ffmpeg, "-y",
+            "-i", base_path,
+            "-vf", vf,
+            "-t", str(duration),
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        self._check(result, f"generate_punch_card(scale-in) → {output_path!r}")
 
     def concat_segments_video_only(self, input_paths: list[str], output_path: str) -> None:
         """Concatenate already-vertical, already-Ken-Burns'd segment videos (video only)."""
