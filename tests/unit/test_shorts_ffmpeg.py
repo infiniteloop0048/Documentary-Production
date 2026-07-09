@@ -149,3 +149,28 @@ class TestMixMusicBed:
         assert "/music.mp3" in args
         assert "[aout]" in args
         assert "/mixed.m4a" in args
+
+
+class TestApplySpeedRamp:
+    def test_uses_setpts_with_the_given_factor(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_speed_ramp("/in.mp4", "/out.mp4", 1.35)
+        args = mock_run.call_args[0][0]
+        vf = args[args.index("-vf") + 1]
+        assert vf == "setpts=PTS/1.35"
+
+    def test_strips_audio_stream(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_speed_ramp("/in.mp4", "/out.mp4", 1.25)
+        args = mock_run.call_args[0][0]
+        assert "-an" in args
+
+    def test_input_and_output_paths_are_argv_values(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_speed_ramp("/clip_in.mp4", "/clip_out.mp4", 1.5)
+        args = mock_run.call_args[0][0]
+        assert args[args.index("-i") + 1] == "/clip_in.mp4"
+        assert args[-1] == "/clip_out.mp4"

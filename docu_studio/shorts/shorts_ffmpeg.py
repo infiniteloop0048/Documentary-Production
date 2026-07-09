@@ -163,6 +163,23 @@ class ShortsFFmpeg(FFmpegWrapper):
         result = subprocess.run(cmd, capture_output=True, text=True)
         self._check(result, f"apply_ken_burns({direction}) → {output_path!r}")
 
+    def apply_speed_ramp(self, input_path: str, output_path: str, speed_factor: float) -> None:
+        """Speed up *input_path*'s video stream by *speed_factor* via setpts
+        (video only — the caller always re-attaches the TTS audio track
+        separately, so no audio stream is read or written here)."""
+        cmd = [
+            self._ffmpeg, "-y",
+            "-i", input_path,
+            "-vf", f"setpts=PTS/{speed_factor}",
+            "-an",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "23",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        self._check(result, f"apply_speed_ramp(factor={speed_factor}) → {output_path!r}")
+
     def concat_segments_video_only(self, input_paths: list[str], output_path: str) -> None:
         """Concatenate already-vertical, already-Ken-Burns'd segment videos (video only)."""
         n = len(input_paths)
