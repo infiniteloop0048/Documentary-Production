@@ -99,7 +99,11 @@ def _render_group_text(group: list[WordTiming], active_index: int) -> str:
     return " ".join(parts)
 
 
-def generate_ass(timings: list[WordTiming], audio_duration: float | None = None) -> str:
+def generate_ass(
+    timings: list[WordTiming],
+    audio_duration: float | None = None,
+    punch_window: tuple[float, float] | None = None,
+) -> str:
     """Build a full ASS subtitle document from word-level *timings*: words are
     grouped into 2-4 word "pop caption" chunks, the currently-spoken word in
     each chunk is bold and briefly scaled up via an ASS \\t transform, and
@@ -110,6 +114,13 @@ def generate_ass(timings: list[WordTiming], audio_duration: float | None = None)
     too), so exactly one Dialogue event is ever active — no flicker between
     words and no double-blink at group swaps. The very last word's End uses
     *audio_duration* when given, else falls back to its own whisper end.
+
+    *punch_window*, if given, is (card_start, card_end) in seconds: any event
+    fully inside that window is dropped (the punch card carries its own text,
+    so no caption should double up on it), any event partially overlapping it
+    is clamped to whichever edge it crosses, and events entirely outside it
+    are untouched. Gaplessness is only guaranteed among the remaining events
+    themselves — a gap at the card's own window is expected and correct.
     """
     header = _ASS_HEADER_TEMPLATE.format(
         width=SHORTS_WIDTH, height=SHORTS_HEIGHT,
@@ -131,6 +142,21 @@ def generate_ass(timings: list[WordTiming], audio_duration: float | None = None)
         else:
             next_start = word.end
         end_seconds = max(next_start, start + _MIN_WORD_DURATION)
+
+        if punch_window is not None:
+            card_start, card_end = punch_window
+            if start >= card_end or end_seconds <= card_start:
+                pass  # fully outside the card window — unaffected
+            elif start >= card_start and end_seconds <= card_end:
+                continue  # fully inside the card window — drop this event
+            else:
+                if start < card_start:
+                    end_seconds = min(end_seconds, card_start)
+                else:
+                    start = max(start, card_end)
+                if end_seconds <= start:
+                    continue
+
         text = _render_group_text(group, active_index)
         lines.append(
             f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end_seconds)},"
@@ -140,6 +166,11 @@ def generate_ass(timings: list[WordTiming], audio_duration: float | None = None)
 
 
 def write_ass_file(
-    timings: list[WordTiming], output_path: str, audio_duration: float | None = None
+    timings: list[WordTiming],
+    output_path: str,
+    audio_duration: float | None = None,
+    punch_window: tuple[float, float] | None = None,
 ) -> None:
-    Path(output_path).write_text(generate_ass(timings, audio_duration), encoding="utf-8")
+    Path(output_path).write_text(
+        generate_ass(timings, audio_duration, punch_window), encoding="utf-8"
+    )

@@ -183,3 +183,58 @@ class TestWriteAssFile:
         content = out.read_text(encoding="utf-8")
         assert "[Script Info]" in content
         assert "Dialogue:" in content
+
+
+class TestPunchWindowTrimming:
+    def test_event_fully_inside_card_window_is_dropped(self) -> None:
+        timings = _fake_timings(["one", "two", "three", "four"], word_duration=0.5)
+        # words at [0,0.5), [0.5,1.0), [1.0,1.5), [1.5,2.0) roughly (gapless End=next Start)
+        ass = generate_ass(timings, audio_duration=2.5, punch_window=(0.4, 1.6))
+        dialogue_lines = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
+        # "two" ([0.5,1.0)) and "three" ([1.0,1.5)) fall fully inside (0.4,1.6) -> dropped
+        assert len(dialogue_lines) < len(timings)
+
+    def test_event_outside_card_window_is_unaffected(self) -> None:
+        timings = _fake_timings(["one", "two", "three"], word_duration=0.5)
+        ass_without = generate_ass(timings, audio_duration=2.0)
+        ass_with = generate_ass(timings, audio_duration=2.0, punch_window=(5.0, 6.0))
+        assert ass_without == ass_with
+
+    def test_event_overlapping_start_edge_is_clamped(self) -> None:
+        timings = [
+            WordTiming(word="alpha", start=0.0, end=0.9),
+            WordTiming(word="beta", start=1.0, end=1.9),
+        ]
+        # card starts mid-way through "alpha"'s [0.0, 1.0) span (gapless End = next Start = 1.0)
+        ass = generate_ass(timings, audio_duration=2.0, punch_window=(0.5, 1.5))
+        events = _dialogue_times(ass)
+        # "alpha"'s event must end at or before the card start
+        assert events[0][1] <= 0.5
+
+    def test_event_overlapping_end_edge_is_clamped_or_dropped(self) -> None:
+        timings = [
+            WordTiming(word="alpha", start=0.0, end=0.9),
+            WordTiming(word="beta", start=1.0, end=1.9),
+        ]
+        ass = generate_ass(timings, audio_duration=2.0, punch_window=(0.5, 1.5))
+        events = _dialogue_times(ass)
+        # "beta" starts inside the card window (1.0 in [0.5,1.5)) -> either dropped
+        # or its Start clamped to >= 1.5
+        remaining_starts = [s for s, _ in events]
+        assert all(s >= 1.5 or s <= 0.5 for s in remaining_starts)
+
+    def test_no_punch_window_matches_original_output(self) -> None:
+        timings = _fake_timings(["one", "two", "three"])
+        assert generate_ass(timings, audio_duration=2.0) == generate_ass(
+            timings, audio_duration=2.0, punch_window=None,
+        )
+
+    def test_gapless_invariant_preserved_between_kept_events_outside_window(self) -> None:
+        timings = _fake_timings(
+            ["one", "two", "three", "four", "five", "six", "seven", "eight"], word_duration=0.3,
+        )
+        # card window sits entirely after all these words -> nothing should change
+        ass = generate_ass(timings, audio_duration=timings[-1].end + 1.0, punch_window=(50.0, 51.0))
+        events = _dialogue_times(ass)
+        for (_, end), (next_start, _) in zip(events, events[1:]):
+            assert end == next_start
