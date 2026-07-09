@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import subprocess
+from pathlib import Path
 
 from docu_studio.media.ffmpeg_wrapper import FFmpegWrapper
 
@@ -28,8 +29,8 @@ SHORTS_WIDTH = 1080
 SHORTS_HEIGHT = 1920
 
 _PUNCH_CARD_BG = "0x141620"
-# Scale-in completes over the first quarter of the card's own length.
-_PUNCH_SCALE_IN_FRACTION = 0.25
+_PUNCH_FONT_NAME = "DejaVu Sans"
+_PUNCH_SCALE_IN_MS = 200  # scale-in transform completes over this many ms
 
 
 class ShortsFFmpeg(FFmpegWrapper):
@@ -186,48 +187,67 @@ class ShortsFFmpeg(FFmpegWrapper):
 
     def generate_punch_card(self, output_path: str, text: str, duration: float) -> None:
         """Render a *duration*-second full-frame punch card: theme-dark
-        background, huge bold centered white text, with a quick zoompan
-        scale-in over the first _PUNCH_SCALE_IN_FRACTION of its length —
-        reusing apply_ken_burns' frame-linear zoompan recipe so the scale
-        lands exactly on the card's own frame count."""
-        escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
-        fps = 30
-        frames = max(1, round(duration * fps))
-        scale_frames = max(1, round(frames * _PUNCH_SCALE_IN_FRACTION))
-        zoom_expr = f"if(lte(on\\,{scale_frames})\\,0.85+0.15*on/{scale_frames}\\,1.0)"
+        background, huge bold centered white text, with a quick scale-in.
 
-        base_path = f"{output_path}.base.mp4"
-        base_cmd = [
+        drawtext is not compiled into this project's bundled ffmpeg build
+        (only libass/subtitles is) — verified via `ffmpeg -filters`, which
+        lists `subtitles`/`ass` but not `drawtext`. So the card is built as
+        a solid-color lavfi source with a single ASS Dialogue line burned
+        in via the same subtitles= filter (and the same cwd + bare-filename
+        discipline) used by burn_captions. The scale-in is an ASS \\t
+        transform on \\fscx/\\fscy rather than a second zoompan pass — ASS
+        gives sub-pixel-accurate scaling directly, and unlike drawtext its
+        Text field needs no colon/quote escaping (only backslash and the
+        {}  override-tag delimiters), since Text is the last field on the
+        Dialogue line and captures everything after it verbatim.
+        """
+        escaped = text.replace("\\", "\\\\").replace("{", "(").replace("}", ")")
+        fps = 30
+        ass_content = (
+            "[Script Info]\n"
+            "ScriptType: v4.00+\n"
+            f"PlayResX: {SHORTS_WIDTH}\n"
+            f"PlayResY: {SHORTS_HEIGHT}\n"
+            "WrapStyle: 0\n"
+            "ScaledBorderAndShadow: yes\n"
+            "YCbCr Matrix: TV.601\n\n"
+            "[V4+ Styles]\n"
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+            "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+            "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+            "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+            f"Style: Punch,{_PUNCH_FONT_NAME},120,&H00FFFFFF,&H000000FF,"
+            "&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,5,60,60,0,1\n\n"
+            "[Events]\n"
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+            f"Dialogue: 0,0:00:00.00,{self._format_punch_duration(duration)},Punch,,0,0,0,,"
+            f"{{\\fscx70\\fscy70\\t(0,{_PUNCH_SCALE_IN_MS},\\fscx100\\fscy100)}}{escaped}\n"
+        )
+        ass_path = f"{output_path}.card.ass"
+        Path(ass_path).write_text(ass_content, encoding="utf-8")
+
+        ass_dir = os.path.dirname(ass_path) or "."
+        ass_name = os.path.basename(ass_path)
+        cmd = [
             self._ffmpeg, "-y",
             "-f", "lavfi",
             "-i", f"color=c={_PUNCH_CARD_BG}:s={SHORTS_WIDTH}x{SHORTS_HEIGHT}:d={duration}:r={fps}",
-            "-vf", (
-                f"drawtext=text='{escaped}':fontcolor=white:fontsize=120:"
-                "x=(w-text_w)/2:y=(h-text_h)/2:font=DejaVu Sans Bold"
-            ),
+            "-vf", f"subtitles={ass_name}",
             "-t", str(duration),
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-            base_path,
+            os.path.abspath(output_path),
         ]
-        result = subprocess.run(base_cmd, capture_output=True, text=True)
-        self._check(result, f"generate_punch_card(base) → {base_path!r}")
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=ass_dir)
+        self._check(result, f"generate_punch_card → {output_path!r}")
 
-        upscale_dim = SHORTS_WIDTH * 4
-        vf = (
-            f"scale={upscale_dim}:-2:flags=lanczos,"
-            f"zoompan=z='{zoom_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-            f"d={frames}:s={SHORTS_WIDTH}x{SHORTS_HEIGHT}:fps={fps}"
-        )
-        cmd = [
-            self._ffmpeg, "-y",
-            "-i", base_path,
-            "-vf", vf,
-            "-t", str(duration),
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-            output_path,
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        self._check(result, f"generate_punch_card(scale-in) → {output_path!r}")
+    @staticmethod
+    def _format_punch_duration(seconds: float) -> str:
+        seconds = max(0.0, seconds)
+        total_cs = round(seconds * 100)
+        hours, rem = divmod(total_cs, 360000)
+        minutes, rem = divmod(rem, 6000)
+        secs, cs = divmod(rem, 100)
+        return f"{hours}:{minutes:02d}:{secs:02d}.{cs:02d}"
 
     def concat_segments_video_only(self, input_paths: list[str], output_path: str) -> None:
         """Concatenate already-vertical, already-Ken-Burns'd segment videos (video only)."""
