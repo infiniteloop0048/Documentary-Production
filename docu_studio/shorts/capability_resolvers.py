@@ -1,7 +1,7 @@
 """3-tier resolver chain for word-level timing in shorts assembly.
 
 Tier 1: native TTS timestamps, only if the configured TTS adapter exposes them.
-Tier 2: Whisper-based forced alignment — scaffolded, not implemented yet.
+Tier 2: Whisper-based forced alignment (docu_studio.shorts.shorts_alignment).
 Tier 3: estimated timing — words distributed across the measured audio duration,
 weighted by word character length.
 """
@@ -60,10 +60,14 @@ def _tier1_native_timestamps(
 
 
 def _tier2_whisper_alignment(audio_path: str, script_text: str) -> list[WordTiming]:
-    raise NotImplementedError(
-        "Tier 2 (Whisper-based forced alignment) is not implemented yet — "
-        "lands in a follow-up task."
+    from docu_studio.shorts.shorts_alignment import run_tier2_alignment
+
+    timings, fraction_matched = run_tier2_alignment(audio_path, script_text)
+    _log.info(
+        "Tier 2 whisper alignment: %.0f%% of words matched directly, %.0f%% interpolated",
+        fraction_matched * 100, (1 - fraction_matched) * 100,
     )
+    return timings
 
 
 def get_word_timestamps(
@@ -76,9 +80,13 @@ def get_word_timestamps(
         return tier1, "tier1_native"
 
     try:
-        return _tier2_whisper_alignment(audio_path, script_text), "tier2_whisper"
-    except NotImplementedError:
-        pass
+        timings = _tier2_whisper_alignment(audio_path, script_text)
+        _log.info("get_word_timestamps: using Tier 2 (Whisper forced alignment)")
+        return timings, "tier2_whisper"
+    except Exception as exc:
+        _log.warning(
+            "get_word_timestamps: Tier 2 failed (%s) — falling back to Tier 3", exc
+        )
 
     duration = FFmpegWrapper().get_duration(audio_path)
     _log.info("get_word_timestamps: using Tier 3 (estimated timing)")
