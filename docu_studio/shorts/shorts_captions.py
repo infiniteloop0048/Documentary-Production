@@ -118,9 +118,13 @@ def generate_ass(
     *punch_window*, if given, is (card_start, card_end) in seconds: any event
     fully inside that window is dropped (the punch card carries its own text,
     so no caption should double up on it), any event partially overlapping it
-    is clamped to whichever edge it crosses, and events entirely outside it
-    are untouched. Gaplessness is only guaranteed among the remaining events
-    themselves — a gap at the card's own window is expected and correct.
+    is clamped to whichever edge it crosses, an event whose span fully
+    straddles the window (starts before card_start and ends after card_end)
+    is split into two Dialogue lines — one for the span before the card, one
+    for the span after — so its word/group caption isn't lost entirely, and
+    events entirely outside it are untouched. Gaplessness is only guaranteed
+    among the remaining events themselves — a gap at the card's own window is
+    expected and correct.
     """
     header = _ASS_HEADER_TEMPLATE.format(
         width=SHORTS_WIDTH, height=SHORTS_HEIGHT,
@@ -146,22 +150,29 @@ def generate_ass(
         if punch_window is not None:
             card_start, card_end = punch_window
             if start >= card_end or end_seconds <= card_start:
-                pass  # fully outside the card window — unaffected
+                segments_to_emit = [(start, end_seconds)]  # fully outside — unaffected
             elif start >= card_start and end_seconds <= card_end:
-                continue  # fully inside the card window — drop this event
+                segments_to_emit = []  # fully inside the card window — drop this event
+            elif start < card_start and end_seconds > card_end:
+                # the window is a sub-interval of this event's own span — split
+                # into a before-card and an after-card occurrence instead of
+                # truncating away the tail beyond the far edge.
+                segments_to_emit = [(start, card_start), (card_end, end_seconds)]
+            elif start < card_start:
+                segments_to_emit = [(start, card_start)]
             else:
-                if start < card_start:
-                    end_seconds = min(end_seconds, card_start)
-                else:
-                    start = max(start, card_end)
-                if end_seconds <= start:
-                    continue
+                segments_to_emit = [(card_end, end_seconds)]
+        else:
+            segments_to_emit = [(start, end_seconds)]
 
         text = _render_group_text(group, active_index)
-        lines.append(
-            f"Dialogue: 0,{_format_ass_time(start)},{_format_ass_time(end_seconds)},"
-            f"Pop,,0,0,0,,{text}"
-        )
+        for seg_start, seg_end in segments_to_emit:
+            if seg_end <= seg_start:
+                continue  # defensive — structurally unreachable given the branches above
+            lines.append(
+                f"Dialogue: 0,{_format_ass_time(seg_start)},{_format_ass_time(seg_end)},"
+                f"Pop,,0,0,0,,{text}"
+            )
     return "\n".join(lines) + "\n"
 
 

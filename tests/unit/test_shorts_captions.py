@@ -238,3 +238,29 @@ class TestPunchWindowTrimming:
         events = _dialogue_times(ass)
         for (_, end), (next_start, _) in zip(events, events[1:]):
             assert end == next_start
+
+    def test_event_straddling_both_edges_is_split_not_truncated(self) -> None:
+        # Only two words -> group_words produces a single [alpha, beta] group,
+        # so "alpha"'s gapless span runs [0.3, 1.7) (End pinned to "beta"'s
+        # Start). The punch window (0.5, 1.5) is a sub-interval of that span
+        # entirely -> "alpha" must be split into a before-card occurrence
+        # [0.3, 0.5) and an after-card occurrence [1.5, 1.7), not truncated
+        # to just the first piece. "beta" itself starts at 1.7, fully outside
+        # the window, and is untouched.
+        timings = [
+            WordTiming(word="alpha", start=0.3, end=0.3),  # end unused; gapless End = next Start
+            WordTiming(word="beta", start=1.7, end=1.7),
+        ]
+        ass = generate_ass(timings, audio_duration=2.0, punch_window=(0.5, 1.5))
+        events = _dialogue_times(ass)
+        assert len(events) == 3
+        assert events[0] == (0.3, 0.5)
+        assert events[1] == (1.5, 1.7)
+        assert events[2] == (1.7, 2.0)
+
+        dialogue_lines = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
+        # both the pre-card and post-card pieces render "alpha" as the active
+        # (bolded/scaled) word -- same text, split across two time ranges.
+        assert dialogue_lines[0].split(",", 9)[-1] == dialogue_lines[1].split(",", 9)[-1]
+        assert "alpha" in dialogue_lines[0]
+        assert "beta" in dialogue_lines[2]
