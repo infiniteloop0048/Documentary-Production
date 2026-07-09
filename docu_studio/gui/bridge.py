@@ -73,6 +73,7 @@ class Bridge:
             "footage_fallback":           getattr(s, "footage_fallback",           "pixabay"),
             "footage_fallback2":          getattr(s, "footage_fallback2",          "none"),
             "footage_shortage_strategy":  getattr(s, "footage_shortage_strategy",  "loop"),
+            "music_provider":  getattr(s, "music_provider", "local"),
             "anthropic_key":   key_cache.get("docu_studio_anthropic"),
             "openai_key":      key_cache.get("docu_studio_openai"),
             "openrouter_key":  key_cache.get("docu_studio_openrouter"),
@@ -83,6 +84,7 @@ class Bridge:
             "pixabay_key":     key_cache.get("docu_studio_pixabay"),
             "coverr_key":      key_cache.get("docu_studio_coverr"),
             "serper_key":      key_cache.get("docu_studio_serper"),
+            "jamendo_key":     key_cache.get("docu_studio_jamendo"),
         }
 
     def save_settings(self, data: dict) -> dict:
@@ -98,6 +100,7 @@ class Bridge:
             s.footage_fallback           = data.get("footage_fallback",           "pixabay")
             s.footage_fallback2          = data.get("footage_fallback2",          "none")
             s.footage_shortage_strategy  = data.get("footage_shortage_strategy",  "loop")
+            s.music_provider  = data.get("music_provider",  "local")
             folder = data.get("output_folder", "")
             if folder:
                 s.output_folder = folder
@@ -114,6 +117,7 @@ class Bridge:
                     "docu_studio_pixabay":      data.get("pixabay_key",    ""),
                     "docu_studio_coverr":       data.get("coverr_key",     ""),
                     "docu_studio_serper":       data.get("serper_key",     ""),
+                    "docu_studio_jamendo":      data.get("jamendo_key",    ""),
                 }.items():
                     if val is not None:
                         key_cache.set_key(svc, val)
@@ -273,6 +277,8 @@ class Bridge:
             duration_seconds = int(config.get("duration_seconds", 30))
             captions_enabled = bool(config.get("captions_enabled", True))
             music_enabled = bool(config.get("music_enabled", True))
+            music_provider = getattr(s, "music_provider", "local")
+            jamendo_client_id = key_cache.get("docu_studio_jamendo") or ""
 
             self._runner = ShortsRunner(
                 topic=config.get("topic", ""),
@@ -284,10 +290,13 @@ class Bridge:
                 captions_enabled=captions_enabled,
                 music_enabled=music_enabled,
                 sensitive_keys=[
-                    v for v in [llm_key, tts_key, pexels_key, pixabay_key, coverr_key] if v
+                    v for v in [llm_key, tts_key, pexels_key, pixabay_key, coverr_key,
+                                jamendo_client_id] if v
                 ],
                 tts_provider=tts_prov,
                 tts_voice=tts_voice,
+                music_provider=music_provider,
+                jamendo_client_id=jamendo_client_id,
             )
 
             def _run() -> None:

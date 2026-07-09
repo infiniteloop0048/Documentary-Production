@@ -61,6 +61,9 @@ async function _loadSettings() {
       ffallback2 === 'pexels'   ? (s.pexels_key   || '')
       : ffallback2 === 'pixabay' ? (s.pixabay_key  || '') : '';
     _q('coverr-key-input').value = s.coverr_key || '';
+    _q('music-provider').value = s.music_provider || 'local';
+    onMusicProviderChange(_q('music-provider').value);
+    _q('jamendo-key').value = s.jamendo_key || '';
   } catch (e) { console.error('loadSettings:', e); }
 }
 
@@ -109,6 +112,10 @@ function onFootageChange(role) {
   }
 }
 
+function onMusicProviderChange(provider) {
+  _q('jamendo-key-row').style.display = provider === 'jamendo' ? '' : 'none';
+}
+
 async function saveSettings() {
   const btn = _q('save-btn');
   btn.textContent = 'Saving…'; btn.disabled = true;
@@ -142,6 +149,8 @@ async function saveSettings() {
     deepgram_key:    ttsProv === 'deepgram'   ? ttsKey : '',
     serper_key:      _q('serper-key').value,
     coverr_key:      _q('coverr-key-input').value,
+    music_provider:  _q('music-provider').value,
+    jamendo_key:     _q('jamendo-key').value,
   };
   if (fprimary    === 'pexels')   data.pexels_key  = primaryKeyVal;
   if (fprimary    === 'pixabay')  data.pixabay_key = primaryKeyVal;

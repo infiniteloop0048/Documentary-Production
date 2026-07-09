@@ -585,6 +585,37 @@
         </div>
       </div>
 
+      <!-- CARD 4b: Music -->
+      <div class="anim-card bg-card border border-border rounded-xl mb-5 overflow-hidden">
+        <div class="h-0.5 w-full bg-pink-500"></div>
+        <div class="px-6 py-4 border-b border-border">
+          <span class="font-semibold text-white text-sm">Music</span>
+        </div>
+        <div class="px-6 py-5 space-y-5">
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">Provider</label>
+            <select id="music-provider" onchange="onMusicProviderChange(this.value)"
+              class="w-full bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm focus:border-accent focus:outline-none appearance-none cursor-pointer">
+              <option value="local">Local folder</option>
+              <option value="jamendo">Jamendo</option>
+            </select>
+          </div>
+          <div id="jamendo-key-row" style="display:none">
+            <label class="text-sm font-medium text-dim block mb-2">Jamendo Client ID</label>
+            <div class="flex gap-2">
+              <input type="password" id="jamendo-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+              <button onclick="toggleReveal('jamendo-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+            </div>
+          </div>
+          <p class="text-xs text-faint">
+            Local folder plays royalty-free tracks you drop into <span class="font-mono">assets/music/</span>.
+            Jamendo requires a free client ID from
+            <span class="font-mono">developer.jamendo.com</span> and falls back to the local
+            folder automatically if it has no results.
+          </p>
+        </div>
+      </div>
+
       <!-- CARD 5: Output & Narration -->
       <div class="anim-card bg-card border border-border rounded-xl mb-5 overflow-hidden">
         <div class="h-0.5 w-full bg-bstrong"></div>
