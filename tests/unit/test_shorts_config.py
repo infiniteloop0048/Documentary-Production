@@ -34,3 +34,17 @@ class TestShortsConfig:
     def test_aspect_constants_are_vertical(self) -> None:
         assert SHORTS_WIDTH == 1080
         assert SHORTS_HEIGHT == 1920
+
+    def test_new_feature_toggles_default_to_true(self) -> None:
+        cfg = ShortsConfig(topic="x")
+        assert cfg.beat_sync_enabled is True
+        assert cfg.speed_ramp_enabled is True
+        assert cfg.punch_enabled is True
+        assert cfg.loop_revisit_enabled is True
+
+    def test_feature_toggles_can_be_disabled_individually(self) -> None:
+        cfg = ShortsConfig(topic="x", beat_sync_enabled=False, punch_enabled=False)
+        assert cfg.beat_sync_enabled is False
+        assert cfg.speed_ramp_enabled is True
+        assert cfg.punch_enabled is False
+        assert cfg.loop_revisit_enabled is True

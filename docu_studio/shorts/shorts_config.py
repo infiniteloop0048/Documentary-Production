@@ -17,6 +17,10 @@ class ShortsConfig:
     duration_seconds: int = SHORTS_DEFAULT_DURATION
     captions_enabled: bool = True
     music_enabled: bool = True
+    beat_sync_enabled: bool = True
+    speed_ramp_enabled: bool = True
+    punch_enabled: bool = True
+    loop_revisit_enabled: bool = True
 
     def __post_init__(self) -> None:
         if not (SHORTS_MIN_DURATION <= self.duration_seconds <= SHORTS_MAX_DURATION):
