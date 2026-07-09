@@ -22,6 +22,7 @@ from docu_studio.config.defaults import (
     DEFAULT_LLM_MODEL_KEYWORDS,
     DEFAULT_LLM_MODEL_SCRIPT,
     DEFAULT_LLM_PROVIDER,
+    DEFAULT_MUSIC_PROVIDER,
     DEFAULT_TTS_PROVIDER,
     DEFAULT_WPM,
 )
@@ -51,6 +52,7 @@ class Settings:
     footage_fallback2: str = DEFAULT_FOOTAGE_FALLBACK2
     footage_shortage_strategy: str = DEFAULT_FOOTAGE_SHORTAGE_STRATEGY
     llm_custom_model: str = ""
+    music_provider: str = DEFAULT_MUSIC_PROVIDER
 
     # --- persistence ---
 
