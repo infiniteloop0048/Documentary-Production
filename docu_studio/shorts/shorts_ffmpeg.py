@@ -121,26 +121,39 @@ class ShortsFFmpeg(FFmpegWrapper):
         direction='in' zooms 1.0→1.08, direction='out' zooms 1.08→1.0. When *pan* is
         True, a slight horizontal pan is layered on top of the zoom. The transform
         completes over exactly *duration* seconds (d=frames at the target fps).
+
+        zoompan crops on integer pixel coordinates at whatever resolution it's fed,
+        so at native 1080x1920 each 1.0015x zoom increment can round to the same
+        source pixel for several output frames in a row — visible stepping. Scaling
+        up 4x first (lanczos) before zoompan makes every increment land on a distinct
+        source pixel, and using a zoom expression that's a pure function of the
+        output frame number ('on') instead of the classic 'zoom+0.001' accumulator
+        avoids the drift/stutter that pattern causes over a long segment.
         """
         fps = 30
         frames = max(1, round(duration * fps))
+        denom = max(frames - 1, 1)
+        target_zoom = 1.08
+        zoom_delta = target_zoom - 1.0
         if direction == "in":
-            zoom_expr = "min(zoom+0.0015,1.08)"
+            zoom_expr = f"1+{zoom_delta}*on/{denom}"
         else:
-            zoom_expr = "if(eq(on,0),1.08,max(zoom-0.0015,1.0))"
+            zoom_expr = f"{target_zoom}-{zoom_delta}*on/{denom}"
         if pan:
-            x_expr = f"iw/2-(iw/zoom/2)+(on/{frames})*40"
+            x_expr = f"iw/2-(iw/zoom/2)+(on/{denom})*40"
         else:
             x_expr = "iw/2-(iw/zoom/2)"
         y_expr = "ih/2-(ih/zoom/2)"
-        zoompan = (
+        upscale_dim = SHORTS_WIDTH * 4
+        vf = (
+            f"scale={upscale_dim}:-2:flags=lanczos,"
             f"zoompan=z='{zoom_expr}':x='{x_expr}':y='{y_expr}':"
             f"d={frames}:s={SHORTS_WIDTH}x{SHORTS_HEIGHT}:fps={fps}"
         )
         cmd = [
             self._ffmpeg, "-y",
             "-i", input_path,
-            "-vf", zoompan,
+            "-vf", vf,
             "-t", str(duration),
             "-c:v", "libx264",
             "-preset", "ultrafast",

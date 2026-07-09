@@ -88,6 +88,56 @@ class TestBurnCaptions:
         assert args[-1].endswith("out.mp4")
 
 
+class TestApplyKenBurns:
+    def test_upscales_before_zoompan_with_lanczos(self, wrapper: ShortsFFmpeg) -> None:
+        # Real-run regression: zoompan crops on integer pixel coordinates at input
+        # resolution, so without a pre-zoompan upscale each zoom increment lands on
+        # the same source pixel for several output frames — visible stepping.
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_ken_burns("/in.mp4", "/out.mp4", 3.0, "in", False)
+
+        args = mock_run.call_args[0][0]
+        vf = args[args.index("-vf") + 1]
+        assert "scale=4320:-2" in vf
+        assert "lanczos" in vf
+        assert vf.index("scale=") < vf.index("zoompan=")
+
+    def test_zoom_expression_is_frame_linear_not_accumulating(self, wrapper: ShortsFFmpeg) -> None:
+        # The common 'zoom+0.001' accumulator pattern drifts and stutters — z must
+        # be a pure function of the output frame number ('on') instead.
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_ken_burns("/in.mp4", "/out.mp4", 3.0, "in", False)
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert "zoom+" not in vf
+        assert "on/" in vf
+
+    def test_zoom_out_direction_is_also_frame_linear(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_ken_burns("/in.mp4", "/out.mp4", 3.0, "out", False)
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert "zoom+" not in vf
+        assert "zoom-" not in vf
+
+    def test_pan_expression_is_frame_indexed(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_ken_burns("/in.mp4", "/out.mp4", 3.0, "in", True)
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert "x='" in vf
+
+    def test_frame_count_and_fps_match_duration(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_ken_burns("/in.mp4", "/out.mp4", 3.0, "in", False)
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert "d=90" in vf  # 3.0s * 30fps
+        assert "fps=30" in vf
+        assert "s=1080x1920" in vf
+
+
 class TestMixMusicBed:
     def test_calls_ffmpeg_with_looped_music_input_and_aout_map(self, wrapper: ShortsFFmpeg) -> None:
         with patch("subprocess.run") as mock_run:
