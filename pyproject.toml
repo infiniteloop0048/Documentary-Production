@@ -23,6 +23,7 @@ dependencies = [
     "pyqt5>=5.15.11",
     "pyqtwebengine>=5.15.7",
     "gtts>=2.5.4",
+    "librosa>=0.10.0",
 ]
 
 [project.scripts]
