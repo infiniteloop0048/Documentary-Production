@@ -261,6 +261,24 @@
           <div class="mt-2 text-sm text-dim bg-input border border-border rounded-lg px-4 py-2.5">9:16 vertical · 1080 × 1920 (fixed)</div>
         </div>
 
+        <!-- Captions toggle (short/reel) -->
+        <div id="captions-row" class="mt-6 flex items-center justify-between" style="display:none">
+          <div>
+            <label class="text-sm font-medium text-dim block">Burned-in captions</label>
+            <p class="text-xs text-faint mt-0.5">Word-level pop captions in the safe area.</p>
+          </div>
+          <input id="captions-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+        </div>
+
+        <!-- Music toggle (short/reel) -->
+        <div id="music-row" class="mt-4 flex items-center justify-between" style="display:none">
+          <div>
+            <label class="text-sm font-medium text-dim block">Background music</label>
+            <p class="text-xs text-faint mt-0.5">Ducked under narration, only if a track is available.</p>
+          </div>
+          <input id="music-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+        </div>
+
         <!-- Start button -->
         <button id="start-run-btn" onclick="startRun()"
           class="mt-8 bg-accent text-app font-bold text-base px-8 py-3.5 rounded-xl w-full hover:bg-adark transition-colors">
@@ -294,6 +312,15 @@
         <div id="stage-5" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Sync</div>
         <div id="stage-6" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Timeline</div>
         <div id="stage-7" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Done</div>
+      </div>
+      <div class="flex flex-wrap gap-2" id="shorts-stage-track" style="display:none">
+        <div id="short-stage-0" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Script</div>
+        <div id="short-stage-1" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>TTS</div>
+        <div id="short-stage-2" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Alignment</div>
+        <div id="short-stage-3" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Footage</div>
+        <div id="short-stage-4" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Assembly</div>
+        <div id="short-stage-5" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Captions & Music</div>
+        <div id="short-stage-6" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Mux</div>
       </div>
 
       <!-- Log -->

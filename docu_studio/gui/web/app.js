@@ -197,6 +197,8 @@ function startConfig(mode) {
   _q('doc-duration-row').style.display = mode === 'short' ? 'none' : '';
   _q('short-duration-row').style.display = mode === 'short' ? '' : 'none';
   _q('aspect-row').style.display = mode === 'short' ? '' : 'none';
+  _q('captions-row').style.display = mode === 'short' ? '' : 'none';
+  _q('music-row').style.display = mode === 'short' ? '' : 'none';
   showScreen('config');
 }
 
@@ -231,7 +233,11 @@ async function startRun() {
     showScreen('progress');
     _resetProgress();
     startPolling();
-    const res = await window.pywebview.api.start_shorts_run({ topic, duration_seconds: secs });
+    const res = await window.pywebview.api.start_shorts_run({
+      topic, duration_seconds: secs,
+      captions_enabled: _q('captions-toggle').checked,
+      music_enabled: _q('music-toggle').checked,
+    });
     if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
     return;
   }
@@ -266,16 +272,22 @@ async function cancelRun() {
 // ── Progress & polling ────────────────────────────────────────────────────
 
 const STAGES = ['Script','Scenes','Audio','Keywords','Footage','Sync','Timeline','Done'];
+const SHORT_STAGES = ['Script','TTS','Alignment','Footage','Assembly','Captions & Music','Mux'];
 
 function _resetProgress() {
   _q('progress-title').textContent = 'Generating…';
   _q('log-area').innerHTML = '';
   _q('open-folder-btn').style.display = 'none';
-  STAGES.forEach((_, i) => _setStage(i, 'pending'));
+  const isShort = _runMode === 'short';
+  _q('stage-track').style.display = isShort ? 'none' : '';
+  _q('shorts-stage-track').style.display = isShort ? '' : 'none';
+  const stages = isShort ? SHORT_STAGES : STAGES;
+  stages.forEach((_, i) => _setStage(i, 'pending'));
 }
 
 function _setStage(i, state) {
-  const el = _q('stage-' + i);
+  const prefix = _runMode === 'short' ? 'short-stage-' : 'stage-';
+  const el = _q(prefix + i);
   if (!el) return;
   const base = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ';
   const styles = {
@@ -328,7 +340,7 @@ function _handleEvent(ev) {
     const btn = _q('open-folder-btn');
     btn.style.display = '';
     btn.onclick = () => window.pywebview.api.open_output_folder(ev.output_path);
-    _setStage(7, 'complete');
+    _setStage(_runMode === 'short' ? 6 : 7, 'complete');
     _q('cancel-btn').style.display = 'none';
     _q('back-btn').style.display = '';
   }

@@ -32,6 +32,12 @@ class Bridge:
         "timeline": 6, "fcpxml":   6, "export":   6,
         "merge":    7, "done":     7, "complete": 7,
     }
+    _SHORTS_STAGE_MAP = {
+        "script": 0, "tts": 1, "alignment": 2, "footage": 3,
+        "assembly": 4, "caption": 5, "music": 5,
+        "mux": 6, "done": 6, "complete": 6,
+    }
+    _FINAL_STAGE_INDEX_BY_MODE = {"doc": 7, "shorts": 6}
 
     def __init__(self):
         self._window: webview.Window | None = None
@@ -39,6 +45,7 @@ class Bridge:
         self._runner = None
         self._run_thread = None
         self._settings = Settings.load()
+        self._active_mode = "doc"
 
     def set_window(self, w: webview.Window):
         self._window = w
@@ -121,6 +128,7 @@ class Bridge:
         if self._run_thread and self._run_thread.is_alive():
             return {"ok": False, "error": "A run is already in progress"}
         try:
+            self._active_mode = "doc"
             from docu_studio.adapters.footage.factory import build_footage_providers
             from docu_studio.adapters.llm.factory import build_llm
             from docu_studio.adapters.tts.factory import build_tts
@@ -213,6 +221,7 @@ class Bridge:
         if self._run_thread and self._run_thread.is_alive():
             return {"ok": False, "error": "A run is already in progress"}
         try:
+            self._active_mode = "shorts"
             from docu_studio.adapters.footage.factory import build_footage_providers
             from docu_studio.adapters.llm.factory import build_llm
             from docu_studio.adapters.tts.factory import build_tts
@@ -264,6 +273,8 @@ class Bridge:
                 else Path.home() / "DocuStudio"
             )
             duration_seconds = int(config.get("duration_seconds", 30))
+            captions_enabled = bool(config.get("captions_enabled", True))
+            music_enabled = bool(config.get("music_enabled", True))
 
             self._runner = ShortsRunner(
                 topic=config.get("topic", ""),
@@ -272,6 +283,8 @@ class Bridge:
                 tts=tts,
                 footage_providers=footage_list,
                 output_base=output_base,
+                captions_enabled=captions_enabled,
+                music_enabled=music_enabled,
                 sensitive_keys=[
                     v for v in [llm_key, tts_key, pexels_key, pixabay_key, coverr_key] if v
                 ],
@@ -368,6 +381,8 @@ class Bridge:
                     output_path = part.strip()
 
     def _to_js_event(self, event: object) -> dict | None:
+        stage_map = self._SHORTS_STAGE_MAP if self._active_mode == "shorts" else self._STAGE_MAP
+        final_idx = self._FINAL_STAGE_INDEX_BY_MODE.get(self._active_mode, 7)
         cname = type(event).__name__.lower()
 
         if "log" in cname:
@@ -380,7 +395,7 @@ class Bridge:
                 level = "warning"
             elif any(w in lower for w in ("success", "complete", "done", "finished")):
                 level = "success"
-            for kw, idx in self._STAGE_MAP.items():
+            for kw, idx in stage_map.items():
                 if kw in lower:
                     self._event_q.put({"type": "stage", "index": idx, "state": "active"})
                     break
@@ -389,11 +404,11 @@ class Bridge:
         elif "progress" in cname:
             stage = (getattr(event, "stage", "") or "").lower()
             if stage == "done":
-                return {"type": "stage", "index": 7, "state": "complete"}
+                return {"type": "stage", "index": final_idx, "state": "complete"}
             if stage == "cancelled":
                 return {"type": "error", "message": "Run cancelled by user."}
             state = getattr(event, "state", "active")
-            for kw, idx in self._STAGE_MAP.items():
+            for kw, idx in stage_map.items():
                 if kw in stage:
                     return {"type": "stage", "index": idx, "state": state}
             return None
