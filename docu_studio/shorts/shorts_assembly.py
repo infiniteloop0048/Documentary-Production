@@ -10,7 +10,7 @@ from pathlib import Path
 from docu_studio.adapters.footage.base import FootageProvider
 from docu_studio.pipeline.events import LogEvent, LogLevel, ProgressEvent
 from docu_studio.pipeline.stages.footage_assembly import download_clip
-from docu_studio.shorts.capability_resolvers import WordTiming
+from docu_studio.shorts.capability_resolvers import WordTiming, resolve_beat_grid
 from docu_studio.shorts.shorts_cuts import (
     MAX_SEGMENT_DURATION,
     MIN_SEGMENT_DURATION,
@@ -301,79 +301,27 @@ def assemble_short(
     music_enabled: bool = True,
     music_provider: str = "local",
     jamendo_client_id: str = "",
+    beat_sync_enabled: bool = True,
+    speed_ramp_enabled: bool = True,
+    punch_enabled: bool = True,
+    loop_revisit_enabled: bool = True,
 ) -> None:
-    """Build the final vertical short: fetch footage, plan cuts, window/convert/
-    Ken-Burns each segment, concat, and mux with the TTS audio track."""
+    """Build the final vertical short: fetch footage, resolve music (early,
+    so its bpm is available for beat-sync), plan cuts, window/convert/
+    Ken-Burns each segment (with optional speed ramp and loop-revisit
+    alternate window), insert an optional punch card, concat, caption, mix,
+    and mux with the TTS audio track. Every optional feature degrades
+    silently to prior behavior on failure — this function never raises for
+    a feature-specific error."""
     scene_dir = project_folder / "video"
     scene_dir.mkdir(exist_ok=True)
 
     event_queue.put(ProgressEvent(stage="Short Footage", message="Searching stock footage…"))
     clips = _collect_clips(script, providers, scene_dir, event_queue)
 
-    segments = plan_cuts(total_duration=audio_duration, n_clips=len(clips), seed=seed)
-    if tier_used == "tier1_native":
-        sentence_starts = _sentence_start_times(script, timestamps)
-        segments = _snap_to_sentences(segments, sentence_starts)
-
-    event_queue.put(ProgressEvent(stage="Short Assembly", message=f"Building {len(segments)} segments…"))
-
-    segment_paths: list[str] = []
-    for seg in segments:
-        clip = clips[seg.clip_index]
-        raw_duration = ffmpeg.get_duration(clip["path"])
-        window = min(seg.duration, raw_duration)
-        start, method = ffmpeg.detect_motion_window(clip["path"], raw_duration, window)
-        _log.info(
-            "Segment %d: clip=%s window_method=%s start=%.2f",
-            seg.index, clip["path"], method, start,
-        )
-
-        trim_duration = min(seg.duration, max(0.0, raw_duration - start))
-        if trim_duration < seg.duration:
-            _log.warning(
-                "Segment %d: clip %s only has %.2fs remaining from start=%.2f, "
-                "needed %.2fs (shortfall %.2fs)",
-                seg.index, clip["path"], trim_duration, start, seg.duration,
-                seg.duration - trim_duration,
-            )
-
-        windowed = str(scene_dir / f"seg_{seg.index:03d}_window.mp4")
-        ffmpeg.trim_clip(clip["path"], start, trim_duration, windowed)
-
-        strategy = choose_crop_strategy(clip["width"], clip["height"])
-        vertical = str(scene_dir / f"seg_{seg.index:03d}_vertical.mp4")
-        ffmpeg.vertical_convert(windowed, vertical, strategy)
-        _log.info("Segment %d: crop_strategy=%s", seg.index, strategy)
-
-        direction = "in" if seg.index % 2 == 0 else "out"
-        pan = seg.index % 3 == 0
-        kenburns = str(scene_dir / f"seg_{seg.index:03d}_kb.mp4")
-        ffmpeg.apply_ken_burns(vertical, kenburns, trim_duration, direction, pan)
-
-        segment_paths.append(kenburns)
-
-    concat_path = str(scene_dir / "short_concat.mp4")
-    ffmpeg.concat_segments_video_only(segment_paths, concat_path)
-
-    event_queue.put(ProgressEvent(
-        stage="Short Captions & Music", message="Adding captions and music bed…",
-    ))
-    video_for_mux = concat_path
-    if captions_enabled:
-        try:
-            ass_path = str(scene_dir / "captions.ass")
-            write_ass_file(timestamps, ass_path, audio_duration=audio_duration)
-            captioned_path = str(scene_dir / "short_captioned.mp4")
-            ffmpeg.burn_captions(video_for_mux, ass_path, captioned_path)
-            video_for_mux = captioned_path
-            event_queue.put(LogEvent(message="Captions burned in.", level=LogLevel.INFO))
-        except Exception as exc:
-            event_queue.put(LogEvent(
-                message=f"Captions failed ({exc}) — continuing without captions.",
-                level=LogLevel.WARNING,
-            ))
-
-    audio_for_mux = audio_path
+    music_path: str | None = None
+    track_label = ""
+    track_bpm: int | None = None
     if music_enabled:
         try:
             resolved = resolve_music_track(
@@ -389,15 +337,118 @@ def assemble_short(
                     level=LogLevel.INFO,
                 ))
             else:
-                music_path, track_label, _track_bpm = resolved
-                mixed_audio = str(scene_dir / "audio_mixed.m4a")
-                ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio)
-                audio_for_mux = mixed_audio
+                music_path, track_label, track_bpm = resolved
+        except Exception as exc:
+            event_queue.put(LogEvent(
+                message=f"Music resolution failed ({exc}) — continuing without music.",
+                level=LogLevel.WARNING,
+            ))
+
+    beat_grid: list[float] | None = None
+    if beat_sync_enabled and music_path:
+        try:
+            beat_grid, beat_tier = resolve_beat_grid(music_path, track_bpm, audio_duration)
+            event_queue.put(LogEvent(
+                message=f"Beat grid: tier={beat_tier}"
+                        + (f" ({len(beat_grid)} beats)" if beat_grid else ""),
+                level=LogLevel.INFO,
+            ))
+        except Exception as exc:
+            event_queue.put(LogEvent(
+                message=f"Beat grid resolution failed ({exc}) — cuts unaffected.",
+                level=LogLevel.WARNING,
+            ))
+
+    segments = plan_cuts(
+        total_duration=audio_duration, n_clips=len(clips), seed=seed,
+        beat_grid=beat_grid, loop_revisit=loop_revisit_enabled,
+    )
+    if tier_used == "tier1_native":
+        segments = _snap_to_sentences(segments, _sentence_start_times(script, timestamps))
+
+    punch_window: tuple[float, float] | None = None
+    if punch_enabled and script.punch is not None:
+        try:
+            sentence_starts = _sentence_start_times(script, timestamps)
+            new_segments, window = _insert_punch_card(segments, script.punch, sentence_starts)
+            if window is not None:
+                segments = new_segments
+                punch_window = window
                 event_queue.put(LogEvent(
-                    message=f"Music bed mixed in ({track_label}, provider={music_provider}, "
-                            f"mood={script.music_mood}).",
+                    message=f"Punch card inserted: {script.punch[1]!r} at {window[0]:.2f}s",
                     level=LogLevel.INFO,
                 ))
+            else:
+                event_queue.put(LogEvent(
+                    message="Punch card requested but could not be placed — skipping.",
+                    level=LogLevel.INFO,
+                ))
+        except Exception as exc:
+            event_queue.put(LogEvent(
+                message=f"Punch card failed ({exc}) — continuing without it.",
+                level=LogLevel.WARNING,
+            ))
+
+    event_queue.put(ProgressEvent(stage="Short Assembly", message=f"Building {len(segments)} segments…"))
+
+    segment_paths: list[str] = []
+    sped_count = 0
+    max_sped_segments = len(segments) // 2
+    first_window_start: float | None = None
+    for seg in segments:
+        if seg.is_punch:
+            path = str(scene_dir / f"seg_{seg.index:03d}_punch.mp4")
+            try:
+                ffmpeg.generate_punch_card(path, seg.punch_text or "", seg.duration)
+                segment_paths.append(path)
+                _log.info("Segment %d: punch card %r", seg.index, seg.punch_text)
+            except Exception as exc:
+                _log.warning("Segment %d: punch card render failed (%s) — dropping card", seg.index, exc)
+            continue
+        clip = clips[seg.clip_index]
+        avoid_start = first_window_start if seg.loop_revisit else None
+        path, sped_count, window_start = _build_segment(
+            seg, clip, ffmpeg, scene_dir, speed_ramp_enabled, sped_count, max_sped_segments,
+            avoid_start=avoid_start,
+        )
+        if seg.index == 0:
+            first_window_start = window_start
+        segment_paths.append(path)
+
+    concat_path = str(scene_dir / "short_concat.mp4")
+    ffmpeg.concat_segments_video_only(segment_paths, concat_path)
+
+    event_queue.put(ProgressEvent(
+        stage="Short Captions & Music", message="Adding captions and music bed…",
+    ))
+    video_for_mux = concat_path
+    if captions_enabled:
+        try:
+            ass_path = str(scene_dir / "captions.ass")
+            write_ass_file(
+                timestamps, ass_path, audio_duration=audio_duration, punch_window=punch_window,
+            )
+            captioned_path = str(scene_dir / "short_captioned.mp4")
+            ffmpeg.burn_captions(video_for_mux, ass_path, captioned_path)
+            video_for_mux = captioned_path
+            event_queue.put(LogEvent(message="Captions burned in.", level=LogLevel.INFO))
+        except Exception as exc:
+            event_queue.put(LogEvent(
+                message=f"Captions failed ({exc}) — continuing without captions.",
+                level=LogLevel.WARNING,
+            ))
+
+    audio_for_mux = audio_path
+    if music_path:
+        try:
+            mixed_audio = str(scene_dir / "audio_mixed.m4a")
+            ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio)
+            audio_for_mux = mixed_audio
+            event_queue.put(LogEvent(
+                message=f"Music bed mixed in ({track_label}, provider={music_provider}, "
+                        f"mood={script.music_mood}).",
+                level=LogLevel.INFO,
+            ))
         except Exception as exc:
             event_queue.put(LogEvent(
                 message=f"Music mixing failed ({exc}) — continuing without music.",
