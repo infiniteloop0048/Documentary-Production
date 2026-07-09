@@ -136,6 +136,38 @@ class TestPlanCutsBeatSnapping:
         b = plan_cuts(total_duration=33.0, n_clips=9, seed=99, beat_grid=None)
         assert a == b
 
+    def test_matches_frozen_ground_truth_from_pre_task4_implementation(self) -> None:
+        # Regression guard: these exact (start, duration) pairs were captured by running
+        # the pre-Task-4 plan_cuts (git commit 9438ea2f6d4ba5f2dca37a89187fe9d45e9252d7,
+        # before beat_grid/loop_revisit existed) on total_duration=30.0, n_clips=8, seed=1.
+        # Durations are asserted with exact equality (not pytest.approx) — Task 4's
+        # boundary-subtraction reconstruction (`boundaries[i+1] - boundaries[i]`) silently
+        # drifted every interior duration at the ULP level (e.g. 2.84 became
+        # 2.8399999999999994), and pytest.approx would not have caught that. If this test
+        # ever starts comparing new-code-against-new-code instead of against these frozen
+        # literals, it stops being a real regression guard.
+        expected = [
+            (0, 0.0, 2.27, 0),
+            (1, 2.27, 3.69, 1),
+            (2, 5.96, 2.51, 2),
+            (3, 8.469999999999999, 3.3, 3),
+            (4, 11.77, 2.19, 4),
+            (5, 13.959999999999999, 3.67, 5),
+            (6, 17.63, 2.87, 6),
+            (7, 20.5, 3.52, 7),
+            (8, 24.02, 2.0, 0),
+            (9, 26.02, 3.9800000000000004, 1),
+        ]
+
+        segments = plan_cuts(total_duration=30.0, n_clips=8, seed=1)
+
+        assert len(segments) == len(expected)
+        for seg, (index, start, duration, clip_index) in zip(segments, expected):
+            assert seg.index == index
+            assert seg.start == start
+            assert seg.duration == duration
+            assert seg.clip_index == clip_index
+
 
 class TestPlanCutsLoopRevisit:
     def test_reserves_final_segment_for_clip_zero(self) -> None:

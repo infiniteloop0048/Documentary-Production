@@ -105,8 +105,20 @@ def plan_cuts(
     if revisit_duration > 0:
         boundaries.append(total_duration)
 
+    # Indices of boundaries actually moved by beat snapping. Only segments adjacent to a
+    # moved boundary need their duration recomputed from the (post-snap) boundary
+    # difference — everything else keeps its originally-computed duration bit-for-bit,
+    # since `(a + b) - a` is not guaranteed to equal `b` exactly in IEEE-754. This keeps
+    # the default (no beat_grid, no loop_revisit) path byte-identical to the pre-existing
+    # implementation, where durations were never reconstructed via boundary subtraction.
+    snapped_indices: set[int] = set()
     if beat_grid:
+        original_boundaries = list(boundaries)
         boundaries, snapped_count = _snap_boundaries_to_beats(boundaries, beat_grid)
+        snapped_indices = {
+            i for i, (orig, new) in enumerate(zip(original_boundaries, boundaries))
+            if orig != new
+        }
         total_interior = max(0, len(boundaries) - 2)
         _log.info(
             "plan_cuts: beat snap — %d/%d interior cuts snapped, %d stayed",
@@ -114,18 +126,22 @@ def plan_cuts(
         )
 
     segments: list[Segment] = []
-    for i in range(len(boundaries) - 1):
-        seg_start = boundaries[i]
-        seg_duration = boundaries[i + 1] - seg_start
-        if revisit_duration > 0 and i == len(boundaries) - 2:
-            segments.append(Segment(
-                index=i, start=seg_start, duration=seg_duration,
-                clip_index=0, loop_revisit=True,
-            ))
+    n_segments = len(boundaries) - 1
+    for i in range(n_segments):
+        is_revisit = revisit_duration > 0 and i == n_segments - 1
+        if i in snapped_indices or (i + 1) in snapped_indices:
+            seg_duration = boundaries[i + 1] - boundaries[i]
+        elif is_revisit:
+            seg_duration = revisit_duration
         else:
-            segments.append(Segment(
-                index=i, start=seg_start, duration=seg_duration, clip_index=i % n_clips,
-            ))
+            seg_duration = core_segments[i].duration
+        segments.append(Segment(
+            index=i,
+            start=boundaries[i],
+            duration=seg_duration,
+            clip_index=0 if is_revisit else i % n_clips,
+            loop_revisit=is_revisit,
+        ))
     return segments
 
 
