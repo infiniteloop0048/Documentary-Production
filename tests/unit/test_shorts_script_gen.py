@@ -136,3 +136,52 @@ class TestGenerateShortsScript:
             generate_shorts_script("Ocean depths", 30, llm, tts_provider="elevenlabs", tts_voice="Rachel")
         args, kwargs = llm.generate_script.call_args
         assert kwargs.get("target_words", args[1] if len(args) > 1 else None) == round(30 / 60 * 120.0)
+
+
+class TestMusicMoodField:
+    def test_parses_music_mood_from_first_entry(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
+        llm.break_into_scenes.return_value = [
+            {"title": "aerial city night", "narration": "Fact one is huge.", "music_mood": "epic"},
+            {"title": "close-up hands typing", "narration": "Fact two is bigger."},
+        ]
+        result = generate_shorts_script("Cities at night", 30, llm)
+        assert result.music_mood == "epic"
+
+    def test_defaults_to_cinematic_when_field_absent(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
+        llm.break_into_scenes.return_value = [
+            {"title": "aerial city night", "narration": "Fact one is huge."},
+            {"title": "close-up hands typing", "narration": "Fact two is bigger."},
+        ]
+        result = generate_shorts_script("Cities at night", 30, llm)
+        assert result.music_mood == "cinematic"
+
+    def test_defaults_to_cinematic_when_mood_is_multi_word(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
+        llm.break_into_scenes.return_value = [
+            {"title": "aerial city night", "narration": "Fact one is huge.", "music_mood": "very epic indeed"},
+            {"title": "close-up hands typing", "narration": "Fact two is bigger."},
+        ]
+        result = generate_shorts_script("Cities at night", 30, llm)
+        assert result.music_mood == "cinematic"
+
+    def test_defaults_to_cinematic_when_extraction_fails_entirely(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "One sentence. Two sentence."
+        llm.break_into_scenes.side_effect = RuntimeError("model returned invalid JSON")
+        result = generate_shorts_script("Space facts", 30, llm)
+        assert result.music_mood == "cinematic"
+
+    def test_mood_extraction_does_not_add_extra_llm_calls(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "One sentence. Two sentence."
+        llm.break_into_scenes.side_effect = [
+            [{"title": "only one", "narration": "One sentence."}],  # count mismatch -> retry
+            RuntimeError("still bad"),
+        ]
+        generate_shorts_script("Space facts", 30, llm)
+        assert llm.break_into_scenes.call_count == 2

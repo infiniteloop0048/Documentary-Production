@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 
 from docu_studio.adapters.llm.base import LLMProvider
+from docu_studio.shorts.music_providers import DEFAULT_MUSIC_MOOD
 from docu_studio.shorts.shorts_tts_calibration import get_wpm
 
 _log = logging.getLogger(__name__)
@@ -65,6 +66,9 @@ _QUERY_OVERRIDE_TEMPLATE = (
     "- 'title' must be a concrete 2-5 word visual search query describing stock "
     "footage that would visually match that sentence (e.g. 'aerial city night', "
     "'close-up hands typing'). No abstract or vague terms.\n"
+    "Additionally, on the FIRST entry only, include a 'music_mood' key: a single "
+    "word describing the ideal background music mood for this whole video (e.g. "
+    "'epic', 'calm', 'upbeat', 'mysterious'). Omit this key on every other entry.\n"
     "Return one entry per sentence, in order."
 )
 
@@ -74,22 +78,28 @@ class ShortsScript:
     text: str
     sentences: list[str]
     visual_queries: list[str]
+    music_mood: str = DEFAULT_MUSIC_MOOD
 
 
 def _fallback_queries(topic: str, count: int) -> list[str]:
     return [topic] * count
 
 
-def _extract_queries_via_llm(
-    llm: LLMProvider, script: str, sentence_count: int
-) -> list[str] | None:
-    """Ask the LLM (via break_into_scenes, repurposed for structured JSON output) for
-    a per-sentence visual query. Returns a list aligned to *sentence_count*, or None
-    if the response could not be parsed into exactly that many entries."""
+def _fetch_scene_json(llm: LLMProvider, script: str) -> list[dict] | None:
+    """Make the single break_into_scenes call shared by query and mood extraction."""
     try:
         raw = llm.break_into_scenes(_QUERY_OVERRIDE_TEMPLATE.format(script=script))
     except Exception as exc:
         _log.warning("Shorts visual-query extraction call failed: %s", exc)
+        return None
+    return raw if isinstance(raw, list) else None
+
+
+def _queries_from_raw(raw: list[dict] | None, sentence_count: int) -> list[str] | None:
+    """Parse the per-sentence visual query out of an already-fetched *raw* response.
+    Returns a list aligned to *sentence_count*, or None if it couldn't be parsed
+    into exactly that many entries."""
+    if raw is None:
         return None
     queries = [str(item.get("title", "")).strip() for item in raw if isinstance(item, dict)]
     queries = [q for q in queries if q]
@@ -100,6 +110,20 @@ def _extract_queries_via_llm(
         )
         return None
     return queries
+
+
+def _mood_from_raw(raw: list[dict] | None) -> str:
+    """Return the one-word music mood from an already-fetched *raw* response, or
+    the default if absent, malformed, or not a single word."""
+    if not raw:
+        return DEFAULT_MUSIC_MOOD
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        mood = str(item.get("music_mood", "")).strip().lower()
+        if mood and " " not in mood:
+            return mood
+    return DEFAULT_MUSIC_MOOD
 
 
 def generate_shorts_script(
@@ -130,14 +154,21 @@ def generate_shorts_script(
     if not sentences:
         return ShortsScript(text=text, sentences=[], visual_queries=[])
 
-    queries = _extract_queries_via_llm(llm, text, len(sentences))
+    raw = _fetch_scene_json(llm, text)
+    queries = _queries_from_raw(raw, len(sentences))
+    music_mood = _mood_from_raw(raw)
     if queries is None:
         _log.info("Shorts visual-query extraction failed, retrying once")
-        queries = _extract_queries_via_llm(llm, text, len(sentences))
+        raw = _fetch_scene_json(llm, text)
+        queries = _queries_from_raw(raw, len(sentences))
+        if music_mood == DEFAULT_MUSIC_MOOD:
+            music_mood = _mood_from_raw(raw)
     if queries is None:
         _log.warning(
             "Shorts visual-query extraction failed twice, falling back to topic-level query"
         )
         queries = _fallback_queries(topic, len(sentences))
 
-    return ShortsScript(text=text, sentences=sentences, visual_queries=queries)
+    return ShortsScript(
+        text=text, sentences=sentences, visual_queries=queries, music_mood=music_mood,
+    )
