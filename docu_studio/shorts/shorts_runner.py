@@ -53,6 +53,10 @@ class ShortsRunner(threading.Thread):
         tts_voice: str = "",
         music_provider: str = "local",
         jamendo_client_id: str = "",
+        beat_sync_enabled: bool = True,
+        speed_ramp_enabled: bool = True,
+        punch_enabled: bool = True,
+        loop_revisit_enabled: bool = True,
     ) -> None:
         super().__init__(daemon=True, name="ShortsRunner")
         self.config = ShortsConfig(
@@ -60,6 +64,10 @@ class ShortsRunner(threading.Thread):
             duration_seconds=duration_seconds,
             captions_enabled=captions_enabled,
             music_enabled=music_enabled,
+            beat_sync_enabled=beat_sync_enabled,
+            speed_ramp_enabled=speed_ramp_enabled,
+            punch_enabled=punch_enabled,
+            loop_revisit_enabled=loop_revisit_enabled,
         )
         self.llm = llm
         self.tts = tts
@@ -167,6 +175,10 @@ class ShortsRunner(threading.Thread):
             music_enabled=self.config.music_enabled,
             music_provider=self._music_provider,
             jamendo_client_id=self._jamendo_client_id,
+            beat_sync_enabled=self.config.beat_sync_enabled,
+            speed_ramp_enabled=self.config.speed_ramp_enabled,
+            punch_enabled=self.config.punch_enabled,
+            loop_revisit_enabled=self.config.loop_revisit_enabled,
         )
         if self._cancelled():
             return
