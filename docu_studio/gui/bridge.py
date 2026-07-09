@@ -248,10 +248,8 @@ class Bridge:
             coverr_key  = key_cache.get("docu_studio_coverr")
 
             llm = build_llm(provider, llm_key, model)
-            tts = build_tts(
-                tts_prov, tts_key or "",
-                getattr(s, "deepgram_voice", "aura-asteria-en"),
-            )
+            tts_voice = getattr(s, "deepgram_voice", "aura-asteria-en")
+            tts = build_tts(tts_prov, tts_key or "", tts_voice)
             footage_list = build_footage_providers(
                 getattr(s, "footage_primary",   "pexels"),
                 getattr(s, "footage_fallback",  "pixabay"),
@@ -288,6 +286,8 @@ class Bridge:
                 sensitive_keys=[
                     v for v in [llm_key, tts_key, pexels_key, pixabay_key, coverr_key] if v
                 ],
+                tts_provider=tts_prov,
+                tts_voice=tts_voice,
             )
 
             def _run() -> None:

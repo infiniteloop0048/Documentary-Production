@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 
 from docu_studio.adapters.llm.base import LLMProvider
+from docu_studio.shorts.shorts_tts_calibration import get_wpm
 
 _log = logging.getLogger(__name__)
 
@@ -20,9 +21,10 @@ SHORTS_WPM = 170
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
-def target_word_count(duration_seconds: int) -> int:
-    """Return the target word count for *duration_seconds* at shorts pace (170 WPM)."""
-    return round(duration_seconds / 60 * SHORTS_WPM)
+def target_word_count(duration_seconds: int, wpm: float = SHORTS_WPM) -> int:
+    """Return the target word count for *duration_seconds* at *wpm* pace
+    (defaults to the 170 WPM shorts baseline)."""
+    return round(duration_seconds / 60 * wpm)
 
 
 def split_sentences(text: str) -> list[str]:
@@ -100,9 +102,27 @@ def _extract_queries_via_llm(
     return queries
 
 
-def generate_shorts_script(topic: str, duration_seconds: int, llm: LLMProvider) -> ShortsScript:
-    """Generate a TTS-safe shorts script and per-sentence visual queries for *topic*."""
-    target_words = target_word_count(duration_seconds)
+def generate_shorts_script(
+    topic: str,
+    duration_seconds: int,
+    llm: LLMProvider,
+    tts_provider: str = "",
+    tts_voice: str = "",
+) -> ShortsScript:
+    """Generate a TTS-safe shorts script and per-sentence visual queries for *topic*.
+
+    Word target uses the stored calibration WPM for *tts_provider*+*tts_voice*
+    when one exists (see shorts_tts_calibration), falling back to the 170 WPM
+    default — the configured TTS voice may speak markedly slower/faster than
+    that default, and using its measured pace keeps the synthesized audio
+    close to *duration_seconds*.
+    """
+    wpm = get_wpm(tts_provider, tts_voice, default=SHORTS_WPM)
+    target_words = target_word_count(duration_seconds, wpm=wpm)
+    _log.info(
+        "Shorts word target: %d words for %ds at %.1f WPM (provider=%s voice=%s)",
+        target_words, duration_seconds, wpm, tts_provider or "?", tts_voice or "?",
+    )
     prompt = _SCRIPT_INSTRUCTIONS_TEMPLATE.format(topic=topic, target_words=target_words)
     text = llm.generate_script(topic=prompt, target_words=target_words).strip()
 

@@ -27,6 +27,7 @@ from docu_studio.shorts.shorts_config import ShortsConfig
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_log import QueueLoggingHandler, ShortsTeeQueue
 from docu_studio.shorts.shorts_script_gen import generate_shorts_script
+from docu_studio.shorts.shorts_tts_calibration import record_measurement
 
 
 class ShortsRunStatus(str, Enum):
@@ -48,6 +49,8 @@ class ShortsRunner(threading.Thread):
         music_enabled: bool = True,
         sensitive_keys: list[str] | None = None,
         seed: int | None = None,
+        tts_provider: str = "",
+        tts_voice: str = "",
     ) -> None:
         super().__init__(daemon=True, name="ShortsRunner")
         self.config = ShortsConfig(
@@ -60,6 +63,8 @@ class ShortsRunner(threading.Thread):
         self.tts = tts
         self.footage_providers = footage_providers
         self.output_base = output_base
+        self._tts_provider = tts_provider
+        self._tts_voice = tts_voice
         self._sensitive_keys: list[str] = sensitive_keys or []
         self._seed = seed if seed is not None else int(datetime.now().timestamp())
 
@@ -103,7 +108,10 @@ class ShortsRunner(threading.Thread):
         self.event_queue.put(ProgressEvent(
             stage="Short Script", message=f"Writing short script for '{self.config.topic}'…",
         ))
-        script = generate_shorts_script(self.config.topic, self.config.duration_seconds, self.llm)
+        script = generate_shorts_script(
+            self.config.topic, self.config.duration_seconds, self.llm,
+            tts_provider=self._tts_provider, tts_voice=self._tts_voice,
+        )
         (self._project_folder / "script.md").write_text(script.text, encoding="utf-8")
         self.event_queue.put(LogEvent(
             message=f"Short script generated ({len(script.text.split())} words, "
@@ -117,6 +125,16 @@ class ShortsRunner(threading.Thread):
         audio_path = str(self._project_folder / "audio" / "short.mp3")
         audio_duration = self.tts.synthesize(script.text, audio_path)
         self.event_queue.put(LogEvent(message=f"Voiceover: {audio_duration:.2f}s", level=LogLevel.INFO))
+        measured_wpm = record_measurement(
+            self._tts_provider, self._tts_voice,
+            len(script.text.split()), audio_duration,
+        )
+        if measured_wpm:
+            self.event_queue.put(LogEvent(
+                message=f"Measured TTS pace: {measured_wpm:.1f} WPM (provider={self._tts_provider or '?'} "
+                        f"voice={self._tts_voice or '?'})",
+                level=LogLevel.INFO,
+            ))
         if self._cancelled():
             return
 

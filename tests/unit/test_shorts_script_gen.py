@@ -2,7 +2,8 @@
 sentence splitting."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from docu_studio.shorts.shorts_script_gen import (
     ShortsScript,
@@ -10,6 +11,11 @@ from docu_studio.shorts.shorts_script_gen import (
     split_sentences,
     target_word_count,
 )
+from docu_studio.shorts.shorts_tts_calibration import record_measurement
+
+
+def _patched_calibration(tmp_path: Path):
+    return patch("docu_studio.shorts.shorts_tts_calibration.config_dir", return_value=tmp_path)
 
 
 class TestTargetWordCount:
@@ -25,6 +31,9 @@ class TestTargetWordCount:
     def test_scales_linearly_with_duration(self) -> None:
         assert target_word_count(60) == target_word_count(30) * 2 or \
             abs(target_word_count(60) - target_word_count(30) * 2) <= 1
+
+    def test_uses_explicit_wpm_override(self) -> None:
+        assert target_word_count(30, wpm=120.0) == round(30 / 60 * 120.0)  # 60
 
 
 class TestSplitSentences:
@@ -103,3 +112,27 @@ class TestGenerateShortsScript:
         assert result.sentences == []
         assert result.visual_queries == []
         llm.break_into_scenes.assert_not_called()
+
+    def test_uses_default_wpm_when_no_calibration_for_provider(self, tmp_path: Path) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Just one sentence here."
+        llm.break_into_scenes.return_value = [
+            {"title": "topic shot", "narration": "Just one sentence here."},
+        ]
+        with _patched_calibration(tmp_path):
+            generate_shorts_script("Ocean depths", 30, llm, tts_provider="elevenlabs", tts_voice="Rachel")
+        args, kwargs = llm.generate_script.call_args
+        assert kwargs.get("target_words", args[1] if len(args) > 1 else None) == round(30 / 60 * 170)
+
+    def test_uses_stored_calibration_wpm_for_provider_and_voice(self, tmp_path: Path) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Just one sentence here."
+        llm.break_into_scenes.return_value = [
+            {"title": "topic shot", "narration": "Just one sentence here."},
+        ]
+        with _patched_calibration(tmp_path):
+            # 60 words in 30s -> 120 WPM measured pace for this provider+voice.
+            record_measurement("elevenlabs", "Rachel", word_count=60, measured_duration_seconds=30.0)
+            generate_shorts_script("Ocean depths", 30, llm, tts_provider="elevenlabs", tts_voice="Rachel")
+        args, kwargs = llm.generate_script.call_args
+        assert kwargs.get("target_words", args[1] if len(args) > 1 else None) == round(30 / 60 * 120.0)
