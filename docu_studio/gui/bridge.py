@@ -277,6 +277,10 @@ class Bridge:
             duration_seconds = int(config.get("duration_seconds", 30))
             captions_enabled = bool(config.get("captions_enabled", True))
             music_enabled = bool(config.get("music_enabled", True))
+            beat_sync_enabled = bool(config.get("beat_sync_enabled", True))
+            speed_ramp_enabled = bool(config.get("speed_ramp_enabled", True))
+            punch_enabled = bool(config.get("punch_enabled", True))
+            loop_revisit_enabled = bool(config.get("loop_revisit_enabled", True))
             music_provider = getattr(s, "music_provider", "local")
             jamendo_client_id = key_cache.get("docu_studio_jamendo") or ""
 
@@ -297,6 +301,10 @@ class Bridge:
                 tts_voice=tts_voice,
                 music_provider=music_provider,
                 jamendo_client_id=jamendo_client_id,
+                beat_sync_enabled=beat_sync_enabled,
+                speed_ramp_enabled=speed_ramp_enabled,
+                punch_enabled=punch_enabled,
+                loop_revisit_enabled=loop_revisit_enabled,
             )
 
             def _run() -> None:
