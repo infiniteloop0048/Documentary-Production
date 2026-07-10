@@ -66,5 +66,6 @@ class PexelsAdapter(FootageProvider):
                 duration=duration,
                 width=f.get("width", 1920),
                 height=f.get("height", 1080),
+                clip_id=str(video.get("id", "")),
             ))
         return clips

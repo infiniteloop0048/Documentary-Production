@@ -1,25 +1,37 @@
 """Unit tests for shorts_assembly's pure-ish helper functions: _build_segment
-(speed ramp + loop-revisit alternate window). ShortsFFmpeg is always a
-MagicMock — no real ffmpeg calls.
+(speed ramp + loop-revisit alternate window), _search_dedup/_collect_clips
+(footage fetch dedupe + download capping). ShortsFFmpeg and FootageProvider
+are always MagicMocks/fakes — no real ffmpeg calls or network.
 
 Note: the plan's brief for this test file also references _insert_punch_card
 (time-stealing math) — that helper is added in a later task and its import
 will be added back to this file when it lands."""
 from __future__ import annotations
 
+import queue
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from docu_studio.adapters.footage.base import FootageClip
 from docu_studio.shorts.shorts_assembly import (
     SPEED_RAMP_FACTOR,
     _build_segment,
+    _collect_clips,
     _insert_punch_card,
+    _search_dedup,
 )
 from docu_studio.shorts.shorts_cuts import Segment
+from docu_studio.shorts.shorts_script_gen import ShortsScript
 
 _CLIP = {"path": "/clips/a.mp4", "width": 1920, "height": 1080}
+
+
+def _script(n_sentences: int) -> ShortsScript:
+    sentences = [f"Sentence number {i} of the short." for i in range(n_sentences)]
+    queries = [f"query {i}" for i in range(n_sentences)]
+    return ShortsScript(text=" ".join(sentences), sentences=sentences, visual_queries=queries)
 
 
 def _ffmpeg(raw_duration: float, motion_start: float, method: str = "fallback") -> MagicMock:
@@ -258,3 +270,127 @@ class TestInsertPunchCard:
         )
         assert window is not None
         assert window[1] <= 3.0  # card placed within the non-revisit segment only
+
+
+class TestSearchDedupClipId:
+    def test_dedupes_by_clip_id_even_when_url_differs(self) -> None:
+        # Real-run regression: a provider can return a different signed/
+        # tokenized download URL for the same underlying clip across two
+        # separate search calls — url-based dedup alone would miss this.
+        clip_a = FootageClip(
+            url="https://cdn/a-token1.mp4", duration=20.0, width=1920, height=1080,
+            clip_id="123",
+        )
+        clip_b = FootageClip(
+            url="https://cdn/a-token2.mp4", duration=20.0, width=1920, height=1080,
+            clip_id="123",
+        )
+        provider = MagicMock()
+        provider.search.side_effect = [[clip_a], [clip_b]]
+
+        result = _search_dedup([provider], ["query one", "query two"], min_duration=10.0)
+
+        assert len(result) == 1
+        assert result[0][0] == "https://cdn/a-token1.mp4"  # first-seen kept
+
+    def test_falls_back_to_url_when_clip_id_missing(self) -> None:
+        clip = FootageClip(url="https://cdn/x.mp4", duration=20.0, width=1920, height=1080)
+        same_url_clip = FootageClip(url="https://cdn/x.mp4", duration=20.0, width=1920, height=1080)
+        provider = MagicMock()
+        provider.search.side_effect = [[clip], [same_url_clip]]
+
+        result = _search_dedup([provider], ["q1", "q2"], min_duration=10.0)
+
+        assert len(result) == 1
+
+    def test_distinct_clip_ids_are_not_deduped(self) -> None:
+        clip_a = FootageClip(url="https://cdn/a.mp4", duration=20.0, width=1920, height=1080, clip_id="1")
+        clip_b = FootageClip(url="https://cdn/b.mp4", duration=20.0, width=1920, height=1080, clip_id="2")
+        provider = MagicMock()
+        provider.search.side_effect = [[clip_a], [clip_b]]
+
+        result = _search_dedup([provider], ["q1", "q2"], min_duration=10.0)
+
+        assert len(result) == 2
+
+
+class TestSearchDedupCandidateCap:
+    def test_caps_candidates_kept_per_query(self) -> None:
+        # Real-run regression: each provider.search() call can return up to
+        # 20 results (per_page=20) for a single query — taking all of them
+        # unconditionally is what caused a real run to download 29 clips
+        # against a target of 6-12.
+        clips = [
+            FootageClip(url=f"https://cdn/{i}.mp4", duration=20.0, width=1920, height=1080, clip_id=str(i))
+            for i in range(20)
+        ]
+        provider = MagicMock()
+        provider.search.return_value = clips
+
+        result = _search_dedup([provider], ["one query"], min_duration=10.0, max_per_query=2)
+
+        assert len(result) == 2
+
+    def test_default_cap_is_small(self) -> None:
+        clips = [
+            FootageClip(url=f"https://cdn/{i}.mp4", duration=20.0, width=1920, height=1080, clip_id=str(i))
+            for i in range(20)
+        ]
+        provider = MagicMock()
+        provider.search.return_value = clips
+
+        result = _search_dedup([provider], ["one query"], min_duration=10.0)
+
+        assert len(result) <= 2
+
+
+class TestCollectClipsDownloadCap:
+    @staticmethod
+    def _provider_returning(n_per_query: int) -> MagicMock:
+        provider = MagicMock()
+
+        def fake_search(keywords, min_duration, page=1):
+            q = keywords[0]
+            return [
+                FootageClip(
+                    url=f"https://cdn/{q}-{i}.mp4", duration=30.0, width=1920, height=1080,
+                    clip_id=f"{q}-{i}",
+                )
+                for i in range(n_per_query)
+            ]
+
+        provider.search.side_effect = fake_search
+        return provider
+
+    def test_download_count_capped_to_max_pool_multiplier(self, tmp_path: Path) -> None:
+        # 10 sentences -> n_needed = max(6, 10) = 10 -> max_pool = ceil(10*1.5) = 15.
+        # The per-query cap (2) x 10 unique-clip_id queries produces 20 raw
+        # candidates, which must be truncated to 15 before any download happens.
+        provider = self._provider_returning(20)
+        script = _script(10)
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_clip",
+            side_effect=lambda url, dest: Path(dest).write_bytes(b"x"),
+        ):
+            downloaded = _collect_clips(script, [provider], tmp_path, event_queue)
+
+        assert len(downloaded) == 15
+
+    def test_download_count_not_capped_below_n_needed(self, tmp_path: Path) -> None:
+        # 4 sentences -> n_needed = max(6, 4) = 6. The per-query cap alone
+        # (2 x 4 = 8 unique candidates) already clears that floor, so the
+        # topic-level padding fetch should never fire and downloads should
+        # land near n_needed, not below it.
+        provider = self._provider_returning(20)
+        script = _script(4)
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_clip",
+            side_effect=lambda url, dest: Path(dest).write_bytes(b"x"),
+        ):
+            downloaded = _collect_clips(script, [provider], tmp_path, event_queue)
+
+        assert 6 <= len(downloaded) <= 9  # max_pool = ceil(6 * 1.5) = 9

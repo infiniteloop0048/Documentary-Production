@@ -4,10 +4,11 @@ conversion, Ken Burns, concat + mux — keyed off the measured TTS audio duratio
 from __future__ import annotations
 
 import logging
+import math
 import queue
 from pathlib import Path
 
-from docu_studio.adapters.footage.base import FootageProvider
+from docu_studio.adapters.footage.base import FootageClip, FootageProvider
 from docu_studio.pipeline.events import LogEvent, LogLevel, ProgressEvent
 from docu_studio.pipeline.stages.footage_assembly import download_clip
 from docu_studio.shorts.capability_resolvers import WordTiming, resolve_beat_grid
@@ -26,6 +27,15 @@ from docu_studio.shorts.shorts_script_gen import ShortsScript
 _log = logging.getLogger(__name__)
 
 _MIN_CLIPS = 6
+# Per query, only the provider's top-ranked candidates are worth downloading —
+# each provider.search() call can return up to 20 results (per_page=20), and
+# taking all of them across many per-sentence queries is what caused a real run
+# to download 29 clips against a target of 6-12.
+_MAX_CANDIDATES_PER_QUERY = 2
+# Hard ceiling on the download pool, expressed as a multiple of n_needed, so a
+# query mix that turns up many unique candidates still stays close to the
+# actual segment count instead of downloading everything found.
+_MAX_POOL_MULTIPLIER = 1.5
 
 # plan_cuts' final segment can require up to MIN_SEGMENT_DURATION + MAX_SEGMENT_DURATION
 # (it's trimmed to land exactly on the audio end) — every downloaded clip must be at
@@ -42,21 +52,45 @@ _PUNCH_CARD_MIN_DURATION = 0.8
 _MIN_PUNCH_REMAINDER = 0.3
 
 
+def _dedup_key(clip: FootageClip) -> str:
+    """Prefer the provider's stable clip_id over url — the same underlying
+    clip can come back with a different signed/tokenized download URL across
+    separate search calls, which would defeat url-based dedup."""
+    return clip.clip_id if clip.clip_id else clip.url
+
+
 def _search_dedup(
     providers: list[FootageProvider], queries: list[str], min_duration: float,
+    max_per_query: int = _MAX_CANDIDATES_PER_QUERY,
 ) -> list[tuple[str, int, int]]:
     """Search *providers* for each query in *queries*; return deduped
-    (url, width, height) tuples in first-seen order."""
+    (url, width, height) tuples in first-seen order. Only the first
+    *max_per_query* candidates a provider returns for a given query are kept
+    (providers already rank results by relevance) — logs per-query/provider
+    candidate counts so over-fetch is diagnosable from shorts_log.txt without
+    a follow-up investigation."""
     seen: dict[str, tuple[str, int, int]] = {}
     for query in queries:
         for provider in providers:
             try:
                 clips = provider.search([query], min_duration=min_duration, page=1)
-            except Exception:
+            except Exception as exc:
+                _log.info(
+                    "_search_dedup: query=%r provider=%s raised %s — trying next provider",
+                    query, type(provider).__name__, exc,
+                )
                 continue
-            for clip in clips:
-                if clip.url not in seen:
-                    seen[clip.url] = (clip.url, clip.width, clip.height)
+            candidates = clips[:max_per_query]
+            added = 0
+            for clip in candidates:
+                key = _dedup_key(clip)
+                if key not in seen:
+                    seen[key] = (clip.url, clip.width, clip.height)
+                    added += 1
+            _log.info(
+                "_search_dedup: query=%r provider=%s returned=%d capped_to=%d new=%d pool_size=%d",
+                query, type(provider).__name__, len(clips), len(candidates), added, len(seen),
+            )
             if clips:
                 break
     return list(seen.values())
@@ -67,34 +101,64 @@ def _collect_clips(
     event_queue: queue.Queue,
 ) -> list[dict]:
     """Fetch and download clips for the per-sentence queries, deduped, padded to at
-    least _MIN_CLIPS using the topic-level (first) query if short. Every clip is
-    searched with min_duration >= _MIN_CLIP_DURATION so any assigned segment —
-    including a worst-case final segment — always fits inside the downloaded clip.
+    least _MIN_CLIPS using the topic-level (first) query if short, and capped to
+    _MAX_POOL_MULTIPLIER x the needed count before downloading — a query mix that
+    turns up many unique candidates should not download more than a small buffer
+    over what's actually needed. Every clip is searched with min_duration >=
+    _MIN_CLIP_DURATION so any assigned segment — including a worst-case final
+    segment — always fits inside the downloaded clip.
     Returns [{path, width, height}, ...]."""
     per_sentence = _search_dedup(providers, script.visual_queries, min_duration=_MIN_CLIP_DURATION)
     n_needed = max(_MIN_CLIPS, len(script.sentences))
+    max_pool = math.ceil(n_needed * _MAX_POOL_MULTIPLIER)
 
     pool = list(per_sentence)
+    _log.info(
+        "_collect_clips: per-sentence fetch produced %d deduped candidates "
+        "(n_needed=%d, max_pool=%d)",
+        len(pool), n_needed, max_pool,
+    )
     if len(pool) < n_needed:
         topic_query = script.visual_queries[0] if script.visual_queries else "documentary footage"
         extra = _search_dedup(providers, [topic_query], min_duration=_MIN_CLIP_DURATION)
         existing_urls = {p[0] for p in pool}
+        added = 0
         for item in extra:
             if item[0] not in existing_urls:
                 pool.append(item)
                 existing_urls.add(item[0])
+                added += 1
             if len(pool) >= n_needed:
                 break
+        _log.info(
+            "_collect_clips: pool short of n_needed=%d — topic-level padding fetch "
+            "added %d candidates (pool now %d)",
+            n_needed, added, len(pool),
+        )
+    else:
+        _log.info(
+            "_collect_clips: per-sentence fetch already met n_needed=%d — "
+            "skipping topic-level padding fetch",
+            n_needed,
+        )
 
     if not pool:
         raise RuntimeError("Shorts assembly: no footage found for any query.")
+
+    if len(pool) > max_pool:
+        _log.info(
+            "_collect_clips: capping candidate pool from %d to max_pool=%d before download",
+            len(pool), max_pool,
+        )
+        pool = pool[:max_pool]
 
     downloaded: list[dict] = []
     for i, (url, width, height) in enumerate(pool):
         dest = str(scene_dir / f"short_clip_{i:03d}.mp4")
         try:
             download_clip(url, dest)
-        except Exception:
+        except Exception as exc:
+            _log.info("_collect_clips: download failed for %s (%s) — skipping", url, exc)
             continue
         downloaded.append({"path": dest, "width": width, "height": height})
 
@@ -102,7 +166,8 @@ def _collect_clips(
         raise RuntimeError("Shorts assembly: all footage downloads failed.")
 
     event_queue.put(LogEvent(
-        message=f"Shorts footage: {len(downloaded)} clips downloaded (target {n_needed})",
+        message=f"Shorts footage: {len(downloaded)} clips downloaded "
+                f"(target {n_needed}, pool {len(pool)})",
         level=LogLevel.INFO,
     ))
     return downloaded

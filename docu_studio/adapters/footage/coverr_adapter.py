@@ -70,5 +70,8 @@ class CoverrAdapter(FootageProvider):
             duration = float(hit.get("duration", 0))
             if duration < min_duration:
                 continue
-            clips.append(FootageClip(url=url, duration=duration, width=1920, height=1080))
+            clips.append(FootageClip(
+                url=url, duration=duration, width=1920, height=1080,
+                clip_id=str(hit.get("id", "")),
+            ))
         return clips

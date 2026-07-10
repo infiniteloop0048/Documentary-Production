@@ -78,6 +78,7 @@ class PixabayAdapter(FootageProvider):
                         duration=duration,
                         width=v.get("width", 1920),
                         height=v.get("height", 1080),
+                        clip_id=str(hit.get("id", "")),
                     ))
                     _log.debug("Pixabay: queued clip %s (%.1fs)", url, duration)
                     break
