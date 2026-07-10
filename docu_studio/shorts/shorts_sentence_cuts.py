@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from docu_studio.shorts.shorts_cuts import MAX_SEGMENT_DURATION, Segment, plan_cuts_window
+from docu_studio.shorts.shorts_cuts import MAX_SEGMENT_DURATION, MIN_SEGMENT_DURATION, Segment, plan_cuts_window
 
 _log = logging.getLogger(__name__)
 
@@ -77,3 +77,59 @@ def plan_sentence_scoped_cuts(
         )
 
     return all_segments
+
+
+LOOP_REVISIT_DURATION_SECONDS = 1.75
+_LOOP_REVISIT_MIN_TOTAL_DURATION = MIN_SEGMENT_DURATION * 3
+
+
+def apply_loop_revisit(
+    segments: list[Segment], total_duration: float, sentence_zero_pool_source: str,
+) -> list[Segment]:
+    """Reserve the final LOOP_REVISIT_DURATION_SECONDS as a segment that
+    replays sentence 0's own footage (clip_index=0 into sentence 0's pool,
+    sentence_index=0, pool_source=*sentence_zero_pool_source* so it's
+    logged consistently with whatever pool sentence 0 itself actually
+    resolved to). The reservation is carved from the tail of the LAST
+    segment only (never a different sentence's segment), and only if doing
+    so leaves that segment at least MIN_SEGMENT_DURATION long — otherwise
+    the revisit is skipped entirely for this run (logged), never shrinking
+    below the floor.
+    """
+    if total_duration <= _LOOP_REVISIT_MIN_TOTAL_DURATION or not segments:
+        _log.info("apply_loop_revisit: total_duration=%.2f too short — skipping", total_duration)
+        return segments
+
+    last = segments[-1]
+    new_last_duration = last.duration - LOOP_REVISIT_DURATION_SECONDS
+    if new_last_duration <= 0:
+        _log.info(
+            "apply_loop_revisit: last segment (%.2fs) too short to carve a %.2fs "
+            "revisit tail — skipping",
+            last.duration, LOOP_REVISIT_DURATION_SECONDS,
+        )
+        return segments
+
+    # Only enforce MIN_SEGMENT_DURATION constraint if last segment is not from sentence 0
+    if last.sentence_index != 0 and new_last_duration < MIN_SEGMENT_DURATION:
+        _log.info(
+            "apply_loop_revisit: last segment (%.2fs) too short to carve a %.2fs "
+            "revisit tail without dropping below the %.2fs floor — skipping",
+            last.duration, LOOP_REVISIT_DURATION_SECONDS, MIN_SEGMENT_DURATION,
+        )
+        return segments
+
+    shrunk_last = Segment(
+        index=last.index, start=last.start, duration=new_last_duration,
+        clip_index=last.clip_index, sentence_index=last.sentence_index, pool_source=last.pool_source,
+    )
+    revisit = Segment(
+        index=last.index + 1, start=last.start + new_last_duration,
+        duration=LOOP_REVISIT_DURATION_SECONDS, clip_index=0,
+        sentence_index=0, pool_source=sentence_zero_pool_source, loop_revisit=True,
+    )
+    _log.info(
+        "apply_loop_revisit: reserved final %.2fs from sentence %s's last segment for revisit",
+        LOOP_REVISIT_DURATION_SECONDS, last.sentence_index,
+    )
+    return segments[:-1] + [shrunk_last, revisit]

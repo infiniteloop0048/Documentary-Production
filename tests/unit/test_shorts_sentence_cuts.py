@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import pytest
 
-from docu_studio.shorts.shorts_cuts import MIN_SEGMENT_DURATION
-from docu_studio.shorts.shorts_sentence_cuts import plan_sentence_scoped_cuts
+from docu_studio.shorts.shorts_cuts import MIN_SEGMENT_DURATION, Segment
+from docu_studio.shorts.shorts_sentence_cuts import apply_loop_revisit, plan_sentence_scoped_cuts
 
 
 class TestPlanSentenceScopedCuts:
@@ -101,3 +101,44 @@ class TestPlanSentenceScopedCuts:
             plan_sentence_scoped_cuts(
                 [(0.0, 3.0), (3.0, 6.0)], pool_sizes=[1], pool_sources=["sentence"], seed=1,
             )
+
+
+class TestApplyLoopRevisit:
+    def test_reserves_final_segment_sourced_from_sentence_zero(self) -> None:
+        spans = [(0.0, 20.0)]
+        segments = plan_sentence_scoped_cuts(spans, pool_sizes=[3], pool_sources=["sentence"], seed=1)
+        result = apply_loop_revisit(segments, total_duration=20.0, sentence_zero_pool_source="sentence")
+        last = result[-1]
+        assert last.loop_revisit is True
+        assert last.sentence_index == 0
+        assert last.clip_index == 0
+        assert last.pool_source == "sentence"
+
+    def test_revisit_duration_matches_the_reserved_band(self) -> None:
+        spans = [(0.0, 20.0)]
+        segments = plan_sentence_scoped_cuts(spans, pool_sizes=[3], pool_sources=["sentence"], seed=1)
+        result = apply_loop_revisit(segments, total_duration=20.0, sentence_zero_pool_source="sentence")
+        assert result[-1].duration == pytest.approx(1.75)
+
+    def test_total_duration_preserved(self) -> None:
+        spans = [(0.0, 20.0)]
+        segments = plan_sentence_scoped_cuts(spans, pool_sizes=[3], pool_sources=["sentence"], seed=1)
+        result = apply_loop_revisit(segments, total_duration=20.0, sentence_zero_pool_source="sentence")
+        assert sum(s.duration for s in result) == pytest.approx(20.0, abs=0.02)
+
+    def test_skipped_when_last_segment_too_short_to_carve_the_floor(self) -> None:
+        # Synthetic segments: last segment is 3.0s; carving 1.75s would leave
+        # 1.25s < MIN_SEGMENT_DURATION (2.0s) — must skip, not shrink below it.
+        segments = [
+            Segment(index=0, start=0.0, duration=5.0, clip_index=0, sentence_index=0, pool_source="sentence"),
+            Segment(index=1, start=5.0, duration=3.0, clip_index=0, sentence_index=1, pool_source="sentence"),
+        ]
+        result = apply_loop_revisit(segments, total_duration=8.0, sentence_zero_pool_source="sentence")
+        assert result == segments
+        assert all(not s.loop_revisit for s in result)
+
+    def test_skipped_when_total_duration_too_short(self) -> None:
+        spans = [(0.0, 5.0)]
+        segments = plan_sentence_scoped_cuts(spans, pool_sizes=[1], pool_sources=["sentence"], seed=1)
+        result = apply_loop_revisit(segments, total_duration=5.0, sentence_zero_pool_source="sentence")
+        assert result == segments
