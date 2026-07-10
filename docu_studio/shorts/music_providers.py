@@ -110,18 +110,31 @@ class JamendoMusicProvider:
             _log.warning("Jamendo: search request failed (%s)", exc)
             return []
 
+        raw_results = data.get("results", [])
         candidates: list[TrackCandidate] = []
-        for item in data.get("results", []):
+        for item in raw_results:
+            # Jamendo tracks can have downloads disabled by the artist — the item
+            # still comes back with a `audiodownload` key, but it's an empty string
+            # (and `audiodownload_allowed` is False) rather than the key being
+            # absent, so the old bare-KeyError guard let empty URLs through and
+            # fetch() crashed with "Invalid URL '': No scheme supplied".
+            download_url = item.get("audiodownload") or ""
+            if not download_url:
+                continue
             try:
                 candidates.append(TrackCandidate(
                     title=str(item["name"]),
                     duration=float(item["duration"]),
-                    download_url=str(item["audiodownload"]),
+                    download_url=str(download_url),
                     bpm=None,
                     source="jamendo",
                 ))
             except (KeyError, TypeError, ValueError):
                 continue
+        _log.info(
+            "Jamendo: query %r returned %d raw candidates, %d with a usable download URL",
+            query, len(raw_results), len(candidates),
+        )
         if not candidates:
             _log.info("Jamendo: zero usable results for query %r", query)
         return candidates

@@ -89,6 +89,56 @@ class TestJamendoSearch:
             result = provider.search("epic", max_duration=20.0)
         assert result == []
 
+    def test_filters_out_tracks_with_empty_audiodownload(self) -> None:
+        """Real Jamendo API responses mix downloadable tracks (audiodownload
+        populated, audiodownload_allowed=True) with tracks the artist has
+        disabled downloads for (audiodownload="", audiodownload_allowed=False,
+        streaming-only via `audio`) — both shapes come back with the
+        `audiodownload` key present, so a bare `item["audiodownload"]` read
+        used to let the empty string through and crash fetch() with
+        "Invalid URL '': No scheme supplied"."""
+        payload = {
+            "results": [
+                {
+                    "name": "Musical Appendix No.2",
+                    "duration": 180,
+                    "audiodownload": "https://prod-1.storage.jamendo.com/download/track/2065241/mp31/",
+                    "audiodownload_allowed": True,
+                    "audio": "https://prod-1.storage.jamendo.com/?trackid=2065241&format=mp31",
+                },
+                {
+                    "name": "Mountain King",
+                    "duration": 210,
+                    "audiodownload": "",
+                    "audiodownload_allowed": False,
+                    "audio": "https://prod-1.storage.jamendo.com/?trackid=2148681&format=mp31",
+                },
+                {
+                    "name": "CINE INSTRU",
+                    "duration": 150,
+                    "audiodownload": "https://prod-1.storage.jamendo.com/download/track/2255487/mp31/",
+                    "audiodownload_allowed": True,
+                    "audio": "https://prod-1.storage.jamendo.com/?trackid=2255487&format=mp31",
+                },
+            ]
+        }
+        provider = JamendoMusicProvider(client_id="fake-client-id")
+        with patch("docu_studio.shorts.music_providers.requests.get") as mock_get:
+            mock_get.return_value = MagicMock(status_code=200, json=lambda: payload)
+            candidates = provider.search("cinematic", max_duration=20.0)
+
+        assert len(candidates) == 2
+        assert {c.title for c in candidates} == {"Musical Appendix No.2", "CINE INSTRU"}
+        assert all(c.download_url for c in candidates)
+
+    def test_missing_audiodownload_key_is_also_filtered(self) -> None:
+        payload = {"results": [{"name": "No Download Field", "duration": 120}]}
+        provider = JamendoMusicProvider(client_id="fake-client-id")
+        with patch("docu_studio.shorts.music_providers.requests.get") as mock_get:
+            mock_get.return_value = MagicMock(status_code=200, json=lambda: payload)
+            result = provider.search("epic", max_duration=20.0)
+        assert result == []
+
 
 class TestJamendoFetch:
     def test_downloads_and_caches_by_safe_filename(self, tmp_path: Path) -> None:
