@@ -394,3 +394,27 @@ class TestCollectClipsDownloadCap:
             downloaded = _collect_clips(script, [provider], tmp_path, event_queue)
 
         assert 6 <= len(downloaded) <= 9  # max_pool = ceil(6 * 1.5) = 9
+
+    def test_logs_over_fetch_cap_version_marker_unconditionally(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Real-run regression: a run well after the over-fetch-cap fix landed
+        # on disk still downloaded 42 clips against a target of 6, because a
+        # long-running app process keeps whatever module code was imported at
+        # startup — editing the .py file has no effect until the process
+        # restarts. This marker line lets any run's log prove the cap is
+        # actually active instead of having to infer it from the download
+        # count and message-format archaeology again.
+        provider = self._provider_returning(2)
+        script = _script(4)
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_clip",
+            side_effect=lambda url, dest: Path(dest).write_bytes(b"x"),
+        ):
+            with caplog.at_level("INFO"):
+                _collect_clips(script, [provider], tmp_path, event_queue)
+
+        messages = [r.message for r in caplog.records]
+        assert any("over-fetch cap active" in m for m in messages)

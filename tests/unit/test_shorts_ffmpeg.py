@@ -52,6 +52,22 @@ class TestDetectMotionWindow:
         assert method == "fallback"
         assert start == min(round(45.0 * 0.4, 2), 45.0 - 3.0)
 
+    def test_logs_tier_chain_version_marker_unconditionally(
+        self, wrapper: ShortsFFmpeg, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Real-run regression: a run well after the tiered-chain fix landed on
+        # disk still showed zero diagnostic reasoning and 100% dumb fallback
+        # in shorts_log.txt, because a long-running app process keeps whatever
+        # module code was imported at startup — editing the .py file has no
+        # effect until the process restarts. This marker line lets any run's
+        # log prove which chain actually executed, so that ambiguity doesn't
+        # require re-deriving it from message-format archaeology again. Must
+        # fire even on the earliest possible return (usable <= 0).
+        with caplog.at_level("INFO"):
+            wrapper.detect_motion_window("/clip.mp4", clip_duration=2.0, window=5.0)
+        messages = [r.message for r in caplog.records]
+        assert any("tier-chain=scene-change/motion-energy/fallback" in m for m in messages)
+
     def test_falls_through_to_motion_energy_when_scene_change_finds_nothing(
         self, wrapper: ShortsFFmpeg, caplog: pytest.LogCaptureFixture
     ) -> None:

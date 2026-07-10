@@ -74,6 +74,12 @@ class ShortsFFmpeg(FFmpegWrapper):
         timeout instead of exhausting it. Falls all the way to tier 3 on any ffmpeg
         error or if analysis still exceeds _MOTION_DETECT_TIMEOUT seconds.
         """
+        # Unconditional per-call marker: a long-running app process keeps whatever
+        # module code was imported at startup in memory, so editing this file on
+        # disk has no effect until the process restarts. This line lets any run's
+        # shorts_log.txt prove which chain is actually executing instead of having
+        # to infer it from log-message archaeology.
+        _log.info("detect_motion_window: tier-chain=scene-change/motion-energy/fallback analyzing %s", clip_path)
         usable = max(0.0, clip_duration - window)
         if usable <= 0:
             _log.info(

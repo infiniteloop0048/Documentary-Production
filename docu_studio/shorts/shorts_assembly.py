@@ -108,6 +108,15 @@ def _collect_clips(
     _MIN_CLIP_DURATION so any assigned segment — including a worst-case final
     segment — always fits inside the downloaded clip.
     Returns [{path, width, height}, ...]."""
+    # Unconditional once-per-run marker: a long-running app process keeps whatever
+    # module code was imported at startup in memory, so editing this file on disk
+    # has no effect until the process restarts. This line lets any run's
+    # shorts_log.txt prove the over-fetch cap is actually active instead of having
+    # to infer it from log-message archaeology.
+    _log.info(
+        "_collect_clips: over-fetch cap active (max_candidates_per_query=%d, max_pool_multiplier=%.1f)",
+        _MAX_CANDIDATES_PER_QUERY, _MAX_POOL_MULTIPLIER,
+    )
     per_sentence = _search_dedup(providers, script.visual_queries, min_duration=_MIN_CLIP_DURATION)
     n_needed = max(_MIN_CLIPS, len(script.sentences))
     max_pool = math.ceil(n_needed * _MAX_POOL_MULTIPLIER)
