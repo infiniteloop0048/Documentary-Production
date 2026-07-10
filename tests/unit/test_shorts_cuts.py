@@ -9,6 +9,7 @@ from docu_studio.shorts.shorts_cuts import (
     MIN_SEGMENT_DURATION,
     choose_crop_strategy,
     plan_cuts,
+    plan_cuts_window,
 )
 
 
@@ -214,3 +215,79 @@ class TestPlanCutsLoopRevisit:
         assert snapped[-1].start == beat
         assert snapped[-1].loop_revisit is True
         assert sum(s.duration for s in snapped) == pytest.approx(30.0, abs=0.02)
+
+
+class TestPlanCutsWindow:
+    def test_all_segments_stay_within_the_window_bounds(self) -> None:
+        segments = plan_cuts_window(window_start=10.0, window_duration=9.0, n_clips=4, seed=1)
+        assert segments[0].start == pytest.approx(10.0)
+        assert segments[-1].start + segments[-1].duration == pytest.approx(19.0, abs=0.02)
+        for seg in segments:
+            assert seg.start >= 10.0 - 1e-9
+            assert seg.start + seg.duration <= 19.0 + 1e-9
+
+    def test_segments_sum_to_exact_window_duration(self) -> None:
+        segments = plan_cuts_window(window_start=5.0, window_duration=12.0, n_clips=5, seed=3)
+        assert sum(s.duration for s in segments) == pytest.approx(12.0, abs=0.02)
+
+    def test_non_final_segments_respect_min_max_bounds(self) -> None:
+        segments = plan_cuts_window(window_start=0.0, window_duration=20.0, n_clips=6, seed=7)
+        for seg in segments[:-1]:
+            assert MIN_SEGMENT_DURATION <= seg.duration <= MAX_SEGMENT_DURATION
+
+    def test_short_window_returns_single_segment(self) -> None:
+        segments = plan_cuts_window(window_start=3.0, window_duration=1.8, n_clips=1, seed=1)
+        assert len(segments) == 1
+        assert segments[0].start == pytest.approx(3.0)
+        assert segments[0].duration == pytest.approx(1.8)
+
+    def test_rejects_non_positive_window_duration(self) -> None:
+        with pytest.raises(ValueError):
+            plan_cuts_window(window_start=0.0, window_duration=0.0, n_clips=1, seed=1)
+
+    def test_rejects_non_positive_n_clips(self) -> None:
+        with pytest.raises(ValueError):
+            plan_cuts_window(window_start=0.0, window_duration=10.0, n_clips=0, seed=1)
+
+    def test_reproducible_by_seed(self) -> None:
+        a = plan_cuts_window(window_start=0.0, window_duration=15.0, n_clips=4, seed=9)
+        b = plan_cuts_window(window_start=0.0, window_duration=15.0, n_clips=4, seed=9)
+        assert a == b
+
+    def test_beat_within_window_and_tolerance_is_snapped(self) -> None:
+        baseline = plan_cuts_window(window_start=10.0, window_duration=12.0, n_clips=4, seed=2)
+        first_interior = baseline[1].start
+        beat = round(first_interior + 0.2, 2)
+
+        snapped = plan_cuts_window(
+            window_start=10.0, window_duration=12.0, n_clips=4, seed=2, beat_grid=[beat],
+        )
+        assert snapped[1].start == beat
+
+
+class TestBeatsWithinWindow:
+    def test_keeps_beats_inside_the_window(self) -> None:
+        from docu_studio.shorts.shorts_cuts import _beats_within_window
+        result = _beats_within_window([5.0, 12.0, 18.0], window_start=10.0, window_end=20.0)
+        assert result == [12.0, 18.0]
+
+    def test_drops_beats_outside_the_window(self) -> None:
+        from docu_studio.shorts.shorts_cuts import _beats_within_window
+        result = _beats_within_window([1.0, 9.9, 20.1, 30.0], window_start=10.0, window_end=20.0)
+        assert result == []
+
+    def test_keeps_beats_exactly_on_the_window_edges(self) -> None:
+        from docu_studio.shorts.shorts_cuts import _beats_within_window
+        result = _beats_within_window([10.0, 20.0], window_start=10.0, window_end=20.0)
+        assert result == [10.0, 20.0]
+
+    def test_a_beat_belonging_to_a_neighboring_sentences_span_is_excluded(self) -> None:
+        # Two adjacent windows sharing one global beat_grid: a beat that sits
+        # just past this window's own end (i.e. inside the *next* sentence's
+        # span) must never be considered for snapping in this window, even
+        # though it would be well within BEAT_SNAP_TOLERANCE of this
+        # window's own end boundary.
+        from docu_studio.shorts.shorts_cuts import BEAT_SNAP_TOLERANCE, _beats_within_window
+        neighbor_beat = 20.0 + (BEAT_SNAP_TOLERANCE / 2)
+        result = _beats_within_window([neighbor_beat], window_start=10.0, window_end=20.0)
+        assert result == []

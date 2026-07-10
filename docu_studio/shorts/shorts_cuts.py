@@ -39,6 +39,8 @@ class Segment:
     loop_revisit: bool = False
     is_punch: bool = False
     punch_text: str | None = None
+    sentence_index: int | None = None
+    pool_source: str = "sentence"
 
 
 def plan_cuts(
@@ -180,6 +182,97 @@ def _next_duration(rng: random.Random, prev: float | None) -> float:
             return candidate
     midpoint = (MIN_SEGMENT_DURATION + MAX_SEGMENT_DURATION) / 2
     return MIN_SEGMENT_DURATION if (prev or 0) > midpoint else MAX_SEGMENT_DURATION
+
+
+def _beats_within_window(beat_grid: list[float], window_start: float, window_end: float) -> list[float]:
+    """Return only the beats from *beat_grid* that fall within
+    [window_start, window_end] — used so a sentence's cut-point snapping
+    never considers a beat that temporally belongs to a neighboring
+    sentence's own span, even if it would otherwise be within
+    BEAT_SNAP_TOLERANCE of one of this window's boundaries."""
+    return [b for b in beat_grid if window_start <= b <= window_end]
+
+
+def plan_cuts_window(
+    window_start: float,
+    window_duration: float,
+    n_clips: int,
+    seed: int,
+    beat_grid: list[float] | None = None,
+) -> list[Segment]:
+    """Like plan_cuts, but confines every segment to
+    [window_start, window_start + window_duration] instead of assuming it
+    owns the full timeline from zero — used to cut a single sentence's own
+    time span without ever producing a segment that reaches into a
+    neighboring sentence's span. Same MIN/MAX_SEGMENT_DURATION,
+    MIN_SEGMENT_DELTA and BEAT_SNAP_TOLERANCE rules as plan_cuts apply
+    within the window. *beat_grid* entries outside the window are ignored
+    even if within snap tolerance of a boundary (see _beats_within_window),
+    so a sentence's cuts never snap to a beat belonging to a different
+    sentence's span. Does not support loop_revisit — that is a whole-
+    timeline concern handled separately by apply_loop_revisit.
+
+    This deliberately duplicates plan_cuts' core segment-generation loop
+    rather than sharing it, matching plan_cuts' own existing IEEE-754
+    duration-preservation care (see the comment above its beat-snap
+    handling) — the two functions must never let a shared-helper edit
+    silently perturb plan_cuts' frozen-ground-truth byte-for-byte tests.
+    """
+    if window_duration <= 0:
+        raise ValueError("window_duration must be > 0")
+    if n_clips <= 0:
+        raise ValueError("n_clips must be > 0")
+
+    rng = random.Random(seed)
+
+    if window_duration <= MIN_SEGMENT_DURATION:
+        return [Segment(index=0, start=window_start, duration=window_duration, clip_index=0)]
+
+    durations: list[float] = []
+    elapsed = 0.0
+    prev: float | None = None
+    while True:
+        candidate = _next_duration(rng, prev)
+        if elapsed + candidate >= window_duration - MIN_SEGMENT_DURATION:
+            durations.append(window_duration - elapsed)
+            break
+        durations.append(candidate)
+        elapsed += candidate
+        prev = candidate
+
+    core_segments: list[Segment] = []
+    start = window_start
+    for i, dur in enumerate(durations):
+        core_segments.append(Segment(index=i, start=start, duration=dur, clip_index=i % n_clips))
+        start += dur
+
+    boundaries = [window_start] + [s.start for s in core_segments[1:]] + [window_start + window_duration]
+
+    snapped_indices: set[int] = set()
+    if beat_grid:
+        local_grid = _beats_within_window(beat_grid, window_start, window_start + window_duration)
+        if local_grid:
+            original_boundaries = list(boundaries)
+            boundaries, snapped_count = _snap_boundaries_to_beats(boundaries, local_grid)
+            snapped_indices = {
+                i for i, (orig, new) in enumerate(zip(original_boundaries, boundaries))
+                if orig != new
+            }
+            total_interior = max(0, len(boundaries) - 2)
+            _log.info(
+                "plan_cuts_window: beat snap [%.2f,%.2f) — %d/%d interior cuts snapped",
+                window_start, window_start + window_duration, snapped_count, total_interior,
+            )
+
+    segments: list[Segment] = []
+    n_segments = len(boundaries) - 1
+    for i in range(n_segments):
+        if i in snapped_indices or (i + 1) in snapped_indices:
+            seg_duration = boundaries[i + 1] - boundaries[i]
+        else:
+            seg_duration = core_segments[i].duration
+        segments.append(Segment(index=i, start=boundaries[i], duration=seg_duration, clip_index=i % n_clips))
+    return segments
 
 
 def choose_crop_strategy(source_width: int, source_height: int) -> str:
