@@ -19,6 +19,12 @@ from docu_studio.shorts.shorts_cuts import (
     choose_crop_strategy,
     plan_cuts,
 )
+from docu_studio.shorts.shorts_sentence_cuts import (
+    apply_loop_revisit,
+    insert_punch_card_scoped,
+    plan_sentence_scoped_cuts,
+)
+from docu_studio.shorts.shorts_sentence_spans import sentence_spans
 from docu_studio.shorts.music_providers import resolve_music_track
 from docu_studio.shorts.shorts_captions import write_ass_file
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
@@ -304,33 +310,6 @@ def _collect_clips(
     return downloaded
 
 
-def _sentence_start_times(script: ShortsScript, timestamps: list[WordTiming]) -> list[float]:
-    """Return the start time of each sentence's first word, given a flat *timestamps*
-    list aligned word-for-word to the concatenation of *script.sentences*."""
-    starts: list[float] = []
-    cursor = 0
-    for sentence in script.sentences:
-        word_count = len(sentence.split())
-        if cursor >= len(timestamps) or word_count == 0:
-            break
-        starts.append(timestamps[cursor].start)
-        cursor += word_count
-    return starts
-
-
-def _snap_to_sentences(segments: list[Segment], sentence_starts: list[float]) -> list[Segment]:
-    if not sentence_starts:
-        return segments
-    snapped = []
-    for seg in segments:
-        nearest = min(sentence_starts, key=lambda t: abs(t - seg.start))
-        snapped.append(Segment(
-            index=seg.index, start=nearest, duration=seg.duration, clip_index=seg.clip_index,
-            loop_revisit=seg.loop_revisit, is_punch=seg.is_punch, punch_text=seg.punch_text,
-        ))
-    return snapped
-
-
 def _build_segment(
     seg: Segment,
     clip: dict,
@@ -505,18 +484,43 @@ def assemble_short(
     punch_enabled: bool = True,
     loop_revisit_enabled: bool = True,
 ) -> None:
-    """Build the final vertical short: fetch footage, resolve music (early,
-    so its bpm is available for beat-sync), plan cuts, window/convert/
-    Ken-Burns each segment (with optional speed ramp and loop-revisit
-    alternate window), insert an optional punch card, concat, caption, mix,
-    and mux with the TTS audio track. Every optional feature degrades
-    silently to prior behavior on failure — this function never raises for
-    a feature-specific error."""
+    """Build the final vertical short: fetch each sentence's own footage
+    pool, resolve music (early, so its bpm is available for beat-sync),
+    derive sentence time-spans from the measured word timing, plan cuts
+    sentence-by-sentence (never mixing a sentence's segments with another
+    sentence's footage), window/convert/Ken-Burns each segment (with
+    optional speed ramp and loop-revisit alternate window), insert an
+    optional sentence-scoped punch card, concat, caption, mix, and mux with
+    the TTS audio track. Every optional feature degrades silently to prior
+    behavior on failure — this function never raises for a feature-specific
+    error."""
     scene_dir = project_folder / "video"
     scene_dir.mkdir(exist_ok=True)
+    _log.info("assemble_short: word-timing tier=%s", tier_used)
 
     event_queue.put(ProgressEvent(stage="Short Footage", message="Searching stock footage…"))
-    clips = _collect_clips(script, providers, scene_dir, event_queue)
+    per_sentence_pools, fallback_pool = _collect_clips_per_sentence(script, providers, scene_dir, event_queue)
+
+    resolved_pools: list[list[dict]] = []
+    pool_sources: list[str] = []
+    for i, pool in enumerate(per_sentence_pools):
+        if pool:
+            resolved_pools.append(pool)
+            pool_sources.append("sentence")
+        else:
+            if not fallback_pool:
+                raise RuntimeError(
+                    f"Shorts assembly: sentence {i}'s footage pool is empty and no "
+                    "topic-level fallback is available."
+                )
+            resolved_pools.append(fallback_pool)
+            pool_sources.append("fallback")
+            _log.info("Sentence %d: per-sentence pool empty, using topic-level fallback", i)
+            event_queue.put(LogEvent(
+                message=f"Sentence {i}: per-sentence footage pool was empty — "
+                        "using the topic-level fallback pool instead.",
+                level=LogLevel.INFO,
+            ))
 
     music_path: str | None = None
     track_label = ""
@@ -558,23 +562,27 @@ def assemble_short(
                 level=LogLevel.WARNING,
             ))
 
-    segments = plan_cuts(
-        total_duration=audio_duration, n_clips=len(clips), seed=seed,
-        beat_grid=beat_grid, loop_revisit=loop_revisit_enabled,
+    spans = sentence_spans(script.sentences, timestamps, audio_duration)
+    segments = plan_sentence_scoped_cuts(
+        spans=spans, pool_sizes=[len(p) for p in resolved_pools], pool_sources=pool_sources,
+        seed=seed, beat_grid=beat_grid,
     )
-    if tier_used == "tier1_native":
-        segments = _snap_to_sentences(segments, _sentence_start_times(script, timestamps))
+    if loop_revisit_enabled:
+        segments = apply_loop_revisit(
+            segments, total_duration=audio_duration,
+            sentence_zero_pool_source=pool_sources[0] if pool_sources else "sentence",
+        )
 
     punch_window: tuple[float, float] | None = None
     # (segment_index, rendered_path) of a punch card already rendered here, at plan-
     # commit time — so the assembly loop below just reuses the file instead of
     # re-rendering (and risking a second, later, unrecoverable failure that would
-    # truncate the final narration audio; see Task 12 review Finding 3).
+    # truncate the final narration audio; see Task 12 review Finding 3 in the prior
+    # beat-sync/speed-ramp/punch/loop plan).
     prerendered_punch: tuple[int, str] | None = None
     if punch_enabled and script.punch is not None:
         try:
-            sentence_starts = _sentence_start_times(script, timestamps)
-            new_segments, window = _insert_punch_card(segments, script.punch, sentence_starts)
+            new_segments, window = insert_punch_card_scoped(segments, script.punch, spans)
             if window is not None:
                 punch_index = next(i for i, s in enumerate(new_segments) if s.is_punch)
                 punch_duration = window[1] - window[0]
@@ -615,7 +623,14 @@ def assemble_short(
                     seg.index,
                 )
             continue
-        clip = clips[seg.clip_index]
+        clip = resolved_pools[seg.sentence_index][seg.clip_index]
+        span = spans[seg.sentence_index] if seg.sentence_index is not None else None
+        _log.info(
+            "Segment %d: sentence=%s span=%s pool_source=%s clip_index=%d",
+            seg.index, seg.sentence_index,
+            f"[{span[0]:.2f},{span[1]:.2f}]" if span else "n/a",
+            seg.pool_source, seg.clip_index,
+        )
         avoid_start = first_window_start if seg.loop_revisit else None
         try:
             path, sped_count, window_start = _build_segment(
