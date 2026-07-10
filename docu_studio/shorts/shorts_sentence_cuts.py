@@ -142,9 +142,11 @@ def insert_punch_card_scoped(
 ) -> tuple[list[Segment], tuple[float, float] | None]:
     """Insert a punch-card Segment for sentence *punch[0]*, drawing its time
     allocation only from within that sentence's own span
-    [span_start, span_end) — it may shrink or split that sentence's own
-    segment(s), but can never reach into a neighboring sentence's segment.
-    If the sentence's span is too short to fit both the card
+    [span_start, span_end) — it may shrink that sentence's own leading
+    segment, but can never reach into a neighboring sentence's segment.
+    The card is always carved from the end of the target segment (the
+    sentence's own leading segment, which starts at span_start). If the
+    sentence's span is too short to fit both the card
     (PUNCH_CARD_DURATION_SECONDS, floored at _PUNCH_CARD_MIN_DURATION) and
     leave its target segment at least _PUNCH_MIN_REMAINDER long, the card
     is skipped for this run (logged) rather than shrinking below that floor
@@ -179,28 +181,20 @@ def insert_punch_card_scoped(
         )
         return segments, None
 
-    steal_from_start = target.start > span_start + 1e-9
-    if steal_from_start:
-        card_start = target.start
-        new_target = Segment(
-            index=target.index, start=target.start + card_duration,
-            duration=target.duration - card_duration, clip_index=target.clip_index,
-            sentence_index=target.sentence_index, pool_source=target.pool_source,
+    card_start = target.start + target.duration - card_duration
+    if card_start < span_start - 1e-9 or card_start + card_duration > span_end + 1e-9:
+        _log.info(
+            "Punch card: sentence %d computed placement [%.2f,%.2f) would spill "
+            "outside its own span [%.2f,%.2f) — skipping",
+            sentence_index, card_start, card_start + card_duration, span_start, span_end,
         )
-    else:
-        card_start = target.start + target.duration - card_duration
-        if card_start < span_start - 1e-9:
-            _log.info(
-                "Punch card: sentence %d span too short to place card without "
-                "spilling outside its own span — skipping", sentence_index,
-            )
-            return segments, None
-        new_target = Segment(
-            index=target.index, start=target.start,
-            duration=target.duration - card_duration, clip_index=target.clip_index,
-            sentence_index=target.sentence_index, pool_source=target.pool_source,
-        )
+        return segments, None
 
+    new_target = Segment(
+        index=target.index, start=target.start,
+        duration=target.duration - card_duration, clip_index=target.clip_index,
+        sentence_index=target.sentence_index, pool_source=target.pool_source,
+    )
     card_segment = Segment(
         index=target.index, start=card_start, duration=card_duration,
         clip_index=0, is_punch=True, punch_text=punch_text, sentence_index=sentence_index,
@@ -209,12 +203,8 @@ def insert_punch_card_scoped(
     new_segments: list[Segment] = []
     for s in segments:
         if s is target:
-            if steal_from_start:
-                new_segments.append(card_segment)
-                new_segments.append(new_target)
-            else:
-                new_segments.append(new_target)
-                new_segments.append(card_segment)
+            new_segments.append(new_target)
+            new_segments.append(card_segment)
         else:
             new_segments.append(s)
 
