@@ -52,6 +52,98 @@ class TestDetectMotionWindow:
         assert method == "fallback"
         assert start == min(round(45.0 * 0.4, 2), 45.0 - 3.0)
 
+    def test_falls_through_to_motion_energy_when_scene_change_finds_nothing(
+        self, wrapper: ShortsFFmpeg, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Real-run regression: 9 of 11 real segments fell back with NO logged
+        # reason — turned out to be clips with continuous smooth motion (slow
+        # drone shots, calm scenery) that legitimately never cross the 0.1
+        # scene-change threshold. Motion-energy sampling should catch these.
+        scene_result = MagicMock(returncode=0, stdout="", stderr="")
+        energy_stderr = (
+            "pts_time:0\nlavfi.signalstats.YDIF=1.0\n"
+            "pts_time:5\nlavfi.signalstats.YDIF=9.0\n"
+        )
+        energy_result = MagicMock(returncode=0, stdout="", stderr=energy_stderr)
+        with patch("subprocess.run", side_effect=[scene_result, energy_result]):
+            with caplog.at_level("INFO"):
+                start, method = wrapper.detect_motion_window("/clip.mp4", 20.0, 3.0)
+        assert method == "motion_energy"
+        assert start == 5.0
+        messages = [r.message for r in caplog.records]
+        assert any("zero scene-change markers" in m for m in messages)
+        assert any("motion-energy sampling" in m for m in messages)
+
+    def test_scene_change_timeout_still_tries_motion_energy(
+        self, wrapper: ShortsFFmpeg
+    ) -> None:
+        energy_result = MagicMock(
+            returncode=0, stdout="", stderr="pts_time:5\nlavfi.signalstats.YDIF=9.0\n",
+        )
+        with patch(
+            "subprocess.run",
+            side_effect=[subprocess.TimeoutExpired(cmd="ffmpeg", timeout=20.0), energy_result],
+        ):
+            start, method = wrapper.detect_motion_window("/clip.mp4", 20.0, 3.0)
+        assert method == "motion_energy"
+        assert start == 5.0
+
+    def test_falls_through_all_three_tiers_to_dumb_fallback(
+        self, wrapper: ShortsFFmpeg, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        empty_result = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("subprocess.run", side_effect=[empty_result, empty_result]):
+            with caplog.at_level("INFO"):
+                start, method = wrapper.detect_motion_window("/clip.mp4", 45.0, 3.0)
+        assert method == "fallback"
+        assert start == min(round(45.0 * 0.4, 2), 45.0 - 3.0)
+        messages = [r.message for r in caplog.records]
+        assert any("zero scene-change markers" in m for m in messages)
+        assert any("motion-energy sampling also found nothing" in m for m in messages)
+
+    def test_motion_energy_timeout_falls_to_dumb_fallback(self, wrapper: ShortsFFmpeg) -> None:
+        empty_scene = MagicMock(returncode=0, stdout="", stderr="")
+        with patch(
+            "subprocess.run",
+            side_effect=[empty_scene, subprocess.TimeoutExpired(cmd="ffmpeg", timeout=20.0)],
+        ):
+            start, method = wrapper.detect_motion_window("/clip.mp4", 45.0, 3.0)
+        assert method == "fallback"
+        assert start == min(round(45.0 * 0.4, 2), 45.0 - 3.0)
+
+
+class TestBestEnergyWindow:
+    def test_picks_highest_average_energy_window(self) -> None:
+        stderr = (
+            "pts_time:0\nlavfi.signalstats.YDIF=1.0\n"
+            "pts_time:0.5\nlavfi.signalstats.YDIF=1.0\n"
+            "pts_time:1\nlavfi.signalstats.YDIF=1.0\n"
+            "pts_time:5\nlavfi.signalstats.YDIF=9.0\n"
+            "pts_time:5.5\nlavfi.signalstats.YDIF=9.0\n"
+            "pts_time:6\nlavfi.signalstats.YDIF=9.0\n"
+        )
+        start = ShortsFFmpeg._best_energy_window(stderr, usable=6.0, window=1.0)
+        assert start == 5.0
+
+    def test_returns_none_when_no_samples_found(self) -> None:
+        assert ShortsFFmpeg._best_energy_window("", usable=10.0, window=1.0) is None
+
+    def test_ignores_samples_outside_usable_range(self) -> None:
+        stderr = "pts_time:20\nlavfi.signalstats.YDIF=99.0\n"
+        assert ShortsFFmpeg._best_energy_window(stderr, usable=5.0, window=1.0) is None
+
+    def test_parses_real_ffmpeg_metadata_print_format_with_filter_prefix(self) -> None:
+        # Real ffmpeg prepends "[Parsed_metadata_N @ 0x...]" to every printed
+        # line, not just a bare "pts_time:"/"lavfi..." pair.
+        stderr = (
+            "[Parsed_metadata_3 @ 0x1] frame:0   pts:0   pts_time:0\n"
+            "[Parsed_metadata_3 @ 0x1] lavfi.signalstats.YDIF=1.0\n"
+            "[Parsed_metadata_3 @ 0x1] frame:25  pts:25  pts_time:5\n"
+            "[Parsed_metadata_3 @ 0x1] lavfi.signalstats.YDIF=9.0\n"
+        )
+        start = ShortsFFmpeg._best_energy_window(stderr, usable=5.0, window=1.0)
+        assert start == 5.0
+
 
 class TestBurnCaptions:
     def test_filter_value_uses_bare_filename_never_a_colon_or_path_separator(

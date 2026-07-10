@@ -57,18 +57,32 @@ class ShortsFFmpeg(FFmpegWrapper):
         self, clip_path: str, clip_duration: float, window: float
     ) -> tuple[float, str]:
         """Return (start_time, method) for the *window*-second slice of *clip_path*
-        with the highest motion, sampled at low resolution via scene-change scores.
+        with the highest motion.
+
+        Three-tier chain, each tier logging its own outcome/reason to shorts_log.txt:
+        1. Scene-change detection (cheap, works great for clips with hard cuts) —
+           method="motion" on success.
+        2. Motion-energy sampling (signalstats frame-to-frame diff) — for clips with
+           continuous smooth motion (slow drone shots, static-ish wide shots) that
+           never cross the scene-change threshold — method="motion_energy" on success.
+        3. Dumb positional fallback (40% into the clip) as the last resort —
+           method="fallback".
 
         Analysis is capped to the first _MOTION_ANALYSIS_MAX_DURATION seconds of the
         source (via -t before -i) and to _MOTION_ANALYSIS_FPS, on top of the 160px
         downscale, so typical 15-60s stock clips finish comfortably inside the
-        timeout instead of exhausting it. Falls back to a window starting 40% into
-        the clip (within the spec's 20-60% band) on any ffmpeg error or if analysis
-        still exceeds _MOTION_DETECT_TIMEOUT seconds.
+        timeout instead of exhausting it. Falls all the way to tier 3 on any ffmpeg
+        error or if analysis still exceeds _MOTION_DETECT_TIMEOUT seconds.
         """
         usable = max(0.0, clip_duration - window)
         if usable <= 0:
+            _log.info(
+                "detect_motion_window: %s — window (%.2fs) >= clip_duration (%.2fs), "
+                "no usable range — fallback",
+                clip_path, window, clip_duration,
+            )
             return 0.0, "fallback"
+        fallback_time = min(round(clip_duration * _FALLBACK_WINDOW_FRACTION, 2), usable)
         try:
             cmd = [
                 self._ffmpeg, "-y",
@@ -84,25 +98,135 @@ class ShortsFFmpeg(FFmpegWrapper):
                 cmd, capture_output=True, text=True, timeout=_MOTION_DETECT_TIMEOUT,
             )
             self._check(result, f"detect_motion_window → {clip_path!r}")
-            best_time, used_fallback = self._best_scene_time(result.stderr, usable, clip_duration)
-            return best_time, "fallback" if used_fallback else "motion"
+        except subprocess.TimeoutExpired:
+            _log.info(
+                "detect_motion_window: %s — scene-change analysis timed out after %.1fs "
+                "— trying motion-energy fallback",
+                clip_path, _MOTION_DETECT_TIMEOUT,
+            )
+            return self._motion_energy_or_fallback(clip_path, window, usable, fallback_time)
         except Exception as exc:
-            _log.info("detect_motion_window: falling back for %s (%s)", clip_path, exc)
-            return min(round(clip_duration * _FALLBACK_WINDOW_FRACTION, 2), usable), "fallback"
+            _log.info(
+                "detect_motion_window: %s — scene-change analysis subprocess/ffmpeg error "
+                "(%s) — trying motion-energy fallback",
+                clip_path, exc,
+            )
+            return self._motion_energy_or_fallback(clip_path, window, usable, fallback_time)
+
+        best_time, used_fallback, n_markers = self._best_scene_time(result.stderr, usable, clip_duration)
+        if not used_fallback:
+            _log.info(
+                "detect_motion_window: %s — motion window found via scene-change "
+                "(start=%.2f, %d markers detected)",
+                clip_path, best_time, n_markers,
+            )
+            return best_time, "motion"
+
+        _log.info(
+            "detect_motion_window: %s — zero scene-change markers above threshold "
+            "usable in range (found %d total) — trying motion-energy fallback",
+            clip_path, n_markers,
+        )
+        return self._motion_energy_or_fallback(clip_path, window, usable, fallback_time)
+
+    def _motion_energy_or_fallback(
+        self, clip_path: str, window: float, usable: float, fallback_time: float
+    ) -> tuple[float, str]:
+        """Tier 2→3: try motion-energy sampling; if it finds nothing usable
+        (or errors/times out), fall through to the dumb positional fallback.
+        Always logs the outcome — this is the tripwire for telling "still
+        timing out" apart from "legitimately zero motion signal"."""
+        energy_start = self._detect_motion_energy_window(clip_path, window, usable)
+        if energy_start is not None:
+            _log.info(
+                "detect_motion_window: %s — motion window found via motion-energy "
+                "sampling (start=%.2f)",
+                clip_path, energy_start,
+            )
+            return energy_start, "motion_energy"
+        _log.info(
+            "detect_motion_window: %s — motion-energy sampling also found nothing "
+            "usable — dumb fallback (start=%.2f)",
+            clip_path, fallback_time,
+        )
+        return fallback_time, "fallback"
+
+    def _detect_motion_energy_window(
+        self, clip_path: str, window: float, usable: float
+    ) -> float | None:
+        """Sample frame-to-frame luma difference (signalstats YDIF) across the
+        clip and return the start time of the *window*-second slice with the
+        highest average motion energy, or None on any error/timeout or if no
+        usable samples were found. Unlike scene-change detection (a binary
+        threshold looking for hard cuts), this works for clips with continuous
+        smooth motion (slow pans, drone shots, calm scenery) that never
+        produce a scene-change spike."""
+        try:
+            cmd = [
+                self._ffmpeg, "-y",
+                "-t", str(_MOTION_ANALYSIS_MAX_DURATION),
+                "-i", clip_path,
+                "-vf", (
+                    f"fps={_MOTION_ANALYSIS_FPS},scale={_MOTION_SAMPLE_WIDTH}:-1,"
+                    "signalstats,metadata=print:key=lavfi.signalstats.YDIF"
+                ),
+                "-an", "-f", "null", "-",
+            ]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=_MOTION_DETECT_TIMEOUT,
+            )
+            self._check(result, f"_detect_motion_energy_window → {clip_path!r}")
+        except subprocess.TimeoutExpired:
+            _log.info(
+                "detect_motion_window: %s — motion-energy analysis timed out after %.1fs",
+                clip_path, _MOTION_DETECT_TIMEOUT,
+            )
+            return None
+        except Exception as exc:
+            _log.info(
+                "detect_motion_window: %s — motion-energy analysis subprocess/ffmpeg "
+                "error (%s)",
+                clip_path, exc,
+            )
+            return None
+        return self._best_energy_window(result.stderr, usable, window)
 
     @staticmethod
     def _best_scene_time(
         ffmpeg_stderr: str, usable: float, clip_duration: float
-    ) -> tuple[float, bool]:
+    ) -> tuple[float, bool, int]:
         """Parse 'pts_time:X' markers from ffmpeg's scene-metadata stderr and return
-        (time, used_fallback) — the latest marker that still leaves room for a full
-        window, or the fallback point (with used_fallback=True) if none were found."""
+        (time, used_fallback, n_markers_found) — the latest marker that still leaves
+        room for a full window, or the fallback point (with used_fallback=True) if
+        none were found or none fit within the usable range."""
         times = [float(m) for m in re.findall(r"pts_time:([\d.]+)", ffmpeg_stderr)]
         candidates = [t for t in times if t <= usable]
         if not candidates:
             fallback = min(round(clip_duration * _FALLBACK_WINDOW_FRACTION, 2), usable)
-            return fallback, True
-        return round(max(candidates), 2), False
+            return fallback, True, len(times)
+        return round(max(candidates), 2), False, len(times)
+
+    @staticmethod
+    def _best_energy_window(ffmpeg_stderr: str, usable: float, window: float) -> float | None:
+        """Parse (pts_time, YDIF) sample pairs from signalstats metadata=print
+        stderr and return the start time of the *window*-second slice with the
+        highest average motion energy, or None if no usable samples were found."""
+        pairs = re.findall(
+            r"pts_time:([\d.]+)[^\n]*\n[^\n]*lavfi\.signalstats\.YDIF=([\d.]+)", ffmpeg_stderr,
+        )
+        samples = [(float(t), float(v)) for t, v in pairs]
+        candidates = sorted({t for t, _ in samples if t <= usable})
+        if not candidates:
+            return None
+        best_start, best_avg = None, -1.0
+        for start in candidates:
+            window_samples = [v for t, v in samples if start <= t < start + window]
+            if not window_samples:
+                continue
+            avg = sum(window_samples) / len(window_samples)
+            if avg > best_avg:
+                best_avg, best_start = avg, start
+        return best_start
 
     def vertical_convert(self, input_path: str, output_path: str, strategy: str) -> None:
         """Convert *input_path* to a 1080x1920 vertical video.
