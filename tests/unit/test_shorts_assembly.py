@@ -19,6 +19,7 @@ from docu_studio.shorts.shorts_assembly import (
     SPEED_RAMP_FACTOR,
     _build_segment,
     _collect_clips,
+    _collect_clips_per_sentence,
     _insert_punch_card,
     _search_dedup,
 )
@@ -418,3 +419,87 @@ class TestCollectClipsDownloadCap:
 
         messages = [r.message for r in caplog.records]
         assert any("over-fetch cap active" in m for m in messages)
+
+
+class TestCollectClipsPerSentence:
+    def test_each_sentences_pool_only_contains_clips_from_its_own_query(self, tmp_path: Path) -> None:
+        def fake_search(keywords, min_duration, page=1):
+            q = keywords[0]
+            return [FootageClip(url=f"https://cdn/{q}.mp4", duration=30.0, width=1920, height=1080, clip_id=q)]
+
+        provider = MagicMock()
+        provider.search.side_effect = fake_search
+        script = _script(3)  # queries: "query 0", "query 1", "query 2"
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_clip",
+            side_effect=lambda url, dest: Path(dest).write_bytes(b"x"),
+        ):
+            pools, _fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
+
+        assert len(pools) == 3
+        for pool in pools:
+            assert len(pool) == 1
+        paths = [pool[0]["path"] for pool in pools]
+        assert len(set(paths)) == 3  # each sentence's clip is a distinct download
+
+    def test_identical_clip_across_two_sentence_queries_is_not_downloaded_twice(self, tmp_path: Path) -> None:
+        shared_clip = FootageClip(
+            url="https://cdn/shared.mp4", duration=30.0, width=1920, height=1080, clip_id="shared",
+        )
+        provider = MagicMock()
+        provider.search.side_effect = lambda keywords, min_duration, page=1: [shared_clip]
+        script = _script(2)
+        event_queue: queue.Queue = queue.Queue()
+        download_calls: list[str] = []
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_clip",
+            side_effect=lambda url, dest: (download_calls.append(url), Path(dest).write_bytes(b"x")),
+        ):
+            pools, _fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
+
+        assert len(download_calls) == 1  # downloaded once even though both queries hit it
+        assert len(pools[0]) == 1  # only the FIRST sentence to see it keeps it
+        assert len(pools[1]) == 0
+
+    def test_sentence_with_failed_provider_gets_empty_pool_not_a_borrowed_one(self, tmp_path: Path) -> None:
+        def fake_search(keywords, min_duration, page=1):
+            q = keywords[0]
+            if q == "query 1":
+                raise RuntimeError("provider down")
+            return [FootageClip(url=f"https://cdn/{q}.mp4", duration=30.0, width=1920, height=1080, clip_id=q)]
+
+        provider = MagicMock()
+        provider.search.side_effect = fake_search
+        script = _script(3)
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_clip",
+            side_effect=lambda url, dest: Path(dest).write_bytes(b"x"),
+        ):
+            pools, _fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
+
+        assert pools[1] == []
+        assert len(pools[0]) == 1
+        assert len(pools[2]) == 1
+
+    def test_fallback_pool_is_built_from_the_first_sentences_query(self, tmp_path: Path) -> None:
+        def fake_search(keywords, min_duration, page=1):
+            q = keywords[0]
+            return [FootageClip(url=f"https://cdn/{q}.mp4", duration=30.0, width=1920, height=1080, clip_id=q)]
+
+        provider = MagicMock()
+        provider.search.side_effect = fake_search
+        script = _script(2)
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_clip",
+            side_effect=lambda url, dest: Path(dest).write_bytes(b"x"),
+        ):
+            _pools, fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
+
+        assert len(fallback) == 1

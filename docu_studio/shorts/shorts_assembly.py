@@ -96,6 +96,128 @@ def _search_dedup(
     return list(seen.values())
 
 
+def _search_one_query(
+    providers: list[FootageProvider], query: str, min_duration: float, max_per_query: int,
+) -> list[FootageClip]:
+    """Fan out *query* across *providers* in order, stopping at the first
+    provider that returns any results, capped to *max_per_query* candidates.
+    Used by _collect_clips_per_sentence; deliberately not shared with
+    _search_dedup's own inner loop to avoid touching that already-tested
+    function."""
+    for provider in providers:
+        try:
+            clips = provider.search([query], min_duration=min_duration, page=1)
+        except Exception as exc:
+            _log.info(
+                "_search_one_query: query=%r provider=%s raised %s — trying next provider",
+                query, type(provider).__name__, exc,
+            )
+            continue
+        candidates = clips[:max_per_query]
+        _log.info(
+            "_search_one_query: query=%r provider=%s returned=%d capped_to=%d",
+            query, type(provider).__name__, len(clips), len(candidates),
+        )
+        if clips:
+            return candidates
+    return []
+
+
+def _collect_clips_per_sentence(
+    script: ShortsScript, providers: list[FootageProvider], scene_dir: Path,
+    event_queue: queue.Queue,
+) -> tuple[list[list[dict]], list[dict]]:
+    """Fetch and download footage keeping each sentence's own query as its
+    own candidate pool — pools are never merged, so a segment built from
+    sentence i's pool can only ever show footage that sentence i's own
+    query actually found. Cross-sentence dedup by clip_id still applies (a
+    clip already claimed by an earlier sentence is skipped for a later
+    sentence's pool, so it's never downloaded twice), but that's the only
+    cross-sentence interaction — a sentence's pool otherwise never borrows
+    from another sentence's results.
+
+    Also builds and returns a topic-level fallback pool (from the first
+    sentence's query, since a full script-level topic query isn't tracked
+    separately) for sentences whose own pool ends up empty after dedup and
+    download.
+
+    Returns (per_sentence_pools, fallback_pool): per_sentence_pools[i]
+    lines up with script.sentences[i]; each pool entry is
+    {path, width, height}.
+    """
+    _log.info(
+        "_collect_clips_per_sentence: per-sentence pool collection active "
+        "(max_candidates_per_query=%d)", _MAX_CANDIDATES_PER_QUERY,
+    )
+    seen: dict[str, tuple[str, int, int]] = {}
+    raw_pools: list[list[tuple[str, int, int]]] = []
+    for i, query in enumerate(script.visual_queries):
+        candidates = _search_one_query(providers, query, _MIN_CLIP_DURATION, _MAX_CANDIDATES_PER_QUERY)
+        pool: list[tuple[str, int, int]] = []
+        for clip in candidates:
+            key = _dedup_key(clip)
+            if key in seen:
+                continue
+            entry = (clip.url, clip.width, clip.height)
+            seen[key] = entry
+            pool.append(entry)
+        _log.info(
+            "_collect_clips_per_sentence: sentence %d query=%r pool_size=%d", i, query, len(pool),
+        )
+        raw_pools.append(pool)
+
+    topic_query = script.visual_queries[0] if script.visual_queries else "documentary footage"
+    fallback_candidates = _search_one_query(
+        providers, topic_query, _MIN_CLIP_DURATION, _MAX_CANDIDATES_PER_QUERY * 2,
+    )
+    fallback_raw: list[tuple[str, int, int]] = []
+    for clip in fallback_candidates:
+        key = _dedup_key(clip)
+        entry = seen.get(key, (clip.url, clip.width, clip.height))
+        seen.setdefault(key, entry)
+        fallback_raw.append(entry)
+    _log.info("_collect_clips_per_sentence: topic-level fallback pool_size=%d", len(fallback_raw))
+
+    unique_order: list[str] = []
+    unique_seen: set[str] = set()
+    for pool in raw_pools + [fallback_raw]:
+        for url, _w, _h in pool:
+            if url not in unique_seen:
+                unique_seen.add(url)
+                unique_order.append(url)
+
+    path_by_url: dict[str, str] = {}
+    for i, url in enumerate(unique_order):
+        dest = str(scene_dir / f"short_clip_{i:03d}.mp4")
+        try:
+            download_clip(url, dest)
+        except Exception as exc:
+            _log.info("_collect_clips_per_sentence: download failed for %s (%s) — skipping", url, exc)
+            continue
+        path_by_url[url] = dest
+
+    def _to_dicts(raw: list[tuple[str, int, int]]) -> list[dict]:
+        out = []
+        for url, width, height in raw:
+            path = path_by_url.get(url)
+            if path is not None:
+                out.append({"path": path, "width": width, "height": height})
+        return out
+
+    per_sentence_pools = [_to_dicts(pool) for pool in raw_pools]
+    fallback_pool = _to_dicts(fallback_raw)
+
+    if not any(per_sentence_pools) and not fallback_pool:
+        raise RuntimeError("Shorts assembly: no footage found for any sentence.")
+
+    event_queue.put(LogEvent(
+        message=f"Shorts footage: {len(path_by_url)} clips downloaded across "
+                f"{len(script.sentences)} sentence pools (+{len(fallback_pool)} fallback).",
+        level=LogLevel.INFO,
+    ))
+    return per_sentence_pools, fallback_pool
+
+
 def _collect_clips(
     script: ShortsScript, providers: list[FootageProvider], scene_dir: Path,
     event_queue: queue.Queue,
