@@ -88,6 +88,28 @@ class TestBurnCaptions:
         assert args[-1].endswith("out.mp4")
 
 
+class TestFinalizeFilter:
+    def test_appends_setsar_and_format_suffix(self, wrapper: ShortsFFmpeg) -> None:
+        result = wrapper._finalize_filter("scale=100:100")
+        assert result == "scale=100:100,setsar=1,format=yuv420p"
+
+    def test_ends_with_setsar_1_regardless_of_upstream_filters(self, wrapper: ShortsFFmpeg) -> None:
+        # Real-run regression: chained scale/crop/zoompan filters occasionally
+        # round the encoded SAR to a near-1:1-but-not-exact value (e.g.
+        # 17485:17484), which ffmpeg's concat filter rejects outright when
+        # joining against segments that ARE exactly 1:1. Every per-segment
+        # filter chain must end with setsar=1 no matter what preceded it.
+        chains = [
+            "setpts=PTS/1.35",
+            "scale=4320:-2:flags=lanczos,zoompan=z='1.0':x='0':y='0':d=90:s=1080x1920:fps=30",
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
+            "subtitles=captions.ass",
+        ]
+        for chain in chains:
+            result = wrapper._finalize_filter(chain)
+            assert result.endswith(",setsar=1,format=yuv420p")
+
+
 class TestApplyKenBurns:
     def test_upscales_before_zoompan_with_lanczos(self, wrapper: ShortsFFmpeg) -> None:
         # Real-run regression: zoompan crops on integer pixel coordinates at input
@@ -137,6 +159,16 @@ class TestApplyKenBurns:
         assert "fps=30" in vf
         assert "s=1080x1920" in vf
 
+    def test_filter_chain_ends_with_setsar_and_format(self, wrapper: ShortsFFmpeg) -> None:
+        # Ken Burns' 4x lanczos upscale + zoompan is the step that produced
+        # the drifted SAR (e.g. 17485:17484) in production — see the module
+        # docstring on _finalize_filter.
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_ken_burns("/in.mp4", "/out.mp4", 3.0, "in", False)
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert vf.endswith(",setsar=1,format=yuv420p")
+
 
 class TestMixMusicBed:
     def test_calls_ffmpeg_with_looped_music_input_and_aout_map(self, wrapper: ShortsFFmpeg) -> None:
@@ -158,7 +190,7 @@ class TestApplySpeedRamp:
             wrapper.apply_speed_ramp("/in.mp4", "/out.mp4", 1.35)
         args = mock_run.call_args[0][0]
         vf = args[args.index("-vf") + 1]
-        assert vf == "setpts=PTS/1.35"
+        assert vf == "setpts=PTS/1.35,setsar=1,format=yuv420p"
 
     def test_strips_audio_stream(self, wrapper: ShortsFFmpeg) -> None:
         with patch("subprocess.run") as mock_run:
@@ -174,6 +206,26 @@ class TestApplySpeedRamp:
         args = mock_run.call_args[0][0]
         assert args[args.index("-i") + 1] == "/clip_in.mp4"
         assert args[-1] == "/clip_out.mp4"
+
+
+class TestVerticalConvert:
+    def test_center_crop_filter_chain_ends_with_setsar_and_format(self, wrapper: ShortsFFmpeg) -> None:
+        # vertical_convert's force_original_aspect_ratio scale+crop is the other
+        # chained-scale step implicated in the SAR-drift bug.
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.vertical_convert("/in.mp4", "/out.mp4", "center_crop")
+        args = mock_run.call_args[0][0]
+        filter_complex = args[args.index("-filter_complex") + 1]
+        assert ",setsar=1,format=yuv420p[vout]" in filter_complex
+
+    def test_blur_pad_filter_chain_ends_with_setsar_and_format(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.vertical_convert("/in.mp4", "/out.mp4", "blur_pad")
+        args = mock_run.call_args[0][0]
+        filter_complex = args[args.index("-filter_complex") + 1]
+        assert ",setsar=1,format=yuv420p[vout]" in filter_complex
 
 
 class TestGeneratePunchCard:
@@ -200,8 +252,8 @@ class TestGeneratePunchCard:
             wrapper.generate_punch_card(output_path, "90 PERCENT", 1.0)
         cmd = mock_run.call_args[0][0]
         vf = cmd[cmd.index("-vf") + 1]
-        assert vf == "subtitles=card.mp4.card.ass"
-        assert ":" not in vf.split("=", 1)[1]
+        assert vf == "subtitles=card.mp4.card.ass,setsar=1,format=yuv420p"
+        assert ":" not in vf.split("=", 1)[1].split(",")[0]
 
     def test_cwd_matches_output_path_directory(self, wrapper: ShortsFFmpeg, tmp_path) -> None:
         output_path = str(tmp_path / "card.mp4")
@@ -245,3 +297,59 @@ class TestGeneratePunchCard:
         ass_content = (tmp_path / "card.mp4.card.ass").read_text(encoding="utf-8")
         dialogue_line = next(line for line in ass_content.splitlines() if line.startswith("Dialogue:"))
         assert dialogue_line.endswith("IT'S 50:50 HUGE")
+
+    def test_filter_chain_ends_with_setsar_and_format(self, wrapper: ShortsFFmpeg, tmp_path) -> None:
+        output_path = str(tmp_path / "card.mp4")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.generate_punch_card(output_path, "90 PERCENT", 1.0)
+        cmd = mock_run.call_args[0][0]
+        vf = cmd[cmd.index("-vf") + 1]
+        assert vf.endswith(",setsar=1,format=yuv420p")
+
+
+class TestConcatSegmentsVideoOnly:
+    def test_warns_but_does_not_raise_when_a_segment_sar_is_not_1_1(
+        self, wrapper: ShortsFFmpeg, caplog
+    ) -> None:
+        # Tripwire for any future segment-producing path added without going
+        # through _finalize_filter — this must never abort the run, only log.
+        sar_values = iter(["1:1", "17485:17484", "1:1"])
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == wrapper._ffprobe:
+                return MagicMock(returncode=0, stdout=next(sar_values), stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run):
+            with caplog.at_level("WARNING"):
+                wrapper.concat_segments_video_only(["/a.mp4", "/b.mp4", "/c.mp4"], "/out.mp4")
+
+        assert any("17485:17484" in r.message or "/b.mp4" in r.message for r in caplog.records)
+
+    def test_does_not_warn_when_all_segments_are_1_1(self, wrapper: ShortsFFmpeg, caplog) -> None:
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == wrapper._ffprobe:
+                return MagicMock(returncode=0, stdout="1:1", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run):
+            with caplog.at_level("WARNING"):
+                wrapper.concat_segments_video_only(["/a.mp4", "/b.mp4"], "/out.mp4")
+
+        assert not any("setsar" in r.message.lower() or "sar" in r.message.lower() for r in caplog.records)
+
+    def test_still_concatenates_even_when_sar_mismatch_detected(self, wrapper: ShortsFFmpeg) -> None:
+        # The pre-concat ffprobe check is advisory only — it must never block
+        # or alter the actual concat call.
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == wrapper._ffprobe:
+                return MagicMock(returncode=0, stdout="17485:17484", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run) as mock_run:
+            wrapper.concat_segments_video_only(["/a.mp4", "/b.mp4"], "/out.mp4")
+
+        concat_calls = [c for c in mock_run.call_args_list if "-filter_complex" in c.args[0]]
+        assert len(concat_calls) == 1
+        assert concat_calls[0].args[0][-1] == "/out.mp4"

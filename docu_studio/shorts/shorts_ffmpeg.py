@@ -32,9 +32,26 @@ _PUNCH_CARD_BG = "0x141620"
 _PUNCH_FONT_NAME = "DejaVu Sans"
 _PUNCH_SCALE_IN_MS = 200  # scale-in transform completes over this many ms
 
+# Chained scale operations (vertical_convert's force_original_aspect_ratio
+# crop, Ken Burns' 4x lanczos upscale + zoompan) occasionally round the
+# encoded SAR to a near-1:1-but-not-exact value (e.g. 17485:17484); ffmpeg's
+# concat filter rejects segments whose SAR doesn't match exactly. Every
+# per-segment filter chain must end with this suffix, regardless of which
+# combination of crop/Ken-Burns/speed-ramp/punch-card filters preceded it.
+_SAR_PIXFMT_SUFFIX = "setsar=1,format=yuv420p"
+
 
 class ShortsFFmpeg(FFmpegWrapper):
     """FFmpeg operations used only by the Shorts/Reels assembly path."""
+
+    @staticmethod
+    def _finalize_filter(filter_chain: str) -> str:
+        """Append the shared SAR/pixel-format normalization suffix as the
+        last step of a per-segment filter chain (no output-pad label). Every
+        function that finalizes a segment's filter chain before its
+        per-segment encode must route through this single helper — see
+        _SAR_PIXFMT_SUFFIX for why."""
+        return f"{filter_chain},{_SAR_PIXFMT_SUFFIX}"
 
     def detect_motion_window(
         self, clip_path: str, clip_duration: float, window: float
@@ -94,17 +111,18 @@ class ShortsFFmpeg(FFmpegWrapper):
         strategy='blur_pad': blurred scaled-fill copy behind an aspect-fit foreground.
         """
         if strategy == "blur_pad":
-            filter_complex = (
+            chain = (
                 f"[0:v]scale={SHORTS_WIDTH}:{SHORTS_HEIGHT}:force_original_aspect_ratio=increase,"
                 f"crop={SHORTS_WIDTH}:{SHORTS_HEIGHT},gblur=sigma=20[bg];"
                 f"[0:v]scale={SHORTS_WIDTH}:{SHORTS_HEIGHT}:force_original_aspect_ratio=decrease[fg];"
-                f"[bg][fg]overlay=(W-w)/2:(H-h)/2[vout]"
+                f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
             )
         else:
-            filter_complex = (
+            chain = (
                 f"[0:v]scale={SHORTS_WIDTH}:{SHORTS_HEIGHT}:force_original_aspect_ratio=increase,"
-                f"crop={SHORTS_WIDTH}:{SHORTS_HEIGHT}[vout]"
+                f"crop={SHORTS_WIDTH}:{SHORTS_HEIGHT}"
             )
+        filter_complex = f"{self._finalize_filter(chain)}[vout]"
         cmd = [
             self._ffmpeg, "-y",
             "-i", input_path,
@@ -150,7 +168,7 @@ class ShortsFFmpeg(FFmpegWrapper):
             x_expr = "iw/2-(iw/zoom/2)"
         y_expr = "ih/2-(ih/zoom/2)"
         upscale_dim = SHORTS_WIDTH * 4
-        vf = (
+        vf = self._finalize_filter(
             f"scale={upscale_dim}:-2:flags=lanczos,"
             f"zoompan=z='{zoom_expr}':x='{x_expr}':y='{y_expr}':"
             f"d={frames}:s={SHORTS_WIDTH}x{SHORTS_HEIGHT}:fps={fps}"
@@ -175,7 +193,7 @@ class ShortsFFmpeg(FFmpegWrapper):
         cmd = [
             self._ffmpeg, "-y",
             "-i", input_path,
-            "-vf", f"setpts=PTS/{speed_factor}",
+            "-vf", self._finalize_filter(f"setpts=PTS/{speed_factor}"),
             "-an",
             "-c:v", "libx264",
             "-preset", "ultrafast",
@@ -232,7 +250,7 @@ class ShortsFFmpeg(FFmpegWrapper):
             self._ffmpeg, "-y",
             "-f", "lavfi",
             "-i", f"color=c={_PUNCH_CARD_BG}:s={SHORTS_WIDTH}x{SHORTS_HEIGHT}:d={duration}:r={fps}",
-            "-vf", f"subtitles={ass_name}",
+            "-vf", self._finalize_filter(f"subtitles={ass_name}"),
             "-t", str(duration),
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
             os.path.abspath(output_path),
@@ -249,8 +267,40 @@ class ShortsFFmpeg(FFmpegWrapper):
         secs, cs = divmod(rem, 100)
         return f"{hours}:{minutes:02d}:{secs:02d}.{cs:02d}"
 
+    def _warn_on_sar_mismatch(self, input_paths: list[str]) -> None:
+        """Defensive tripwire, not a hard check: ffprobe each segment's SAR
+        and log a warning if any isn't exactly 1:1. Every segment-producing
+        path in this module routes through _finalize_filter, which should
+        make this impossible — but if a future filter path is ever added
+        without going through it, this turns the failure into an early
+        warning in shorts_log.txt instead of a silent crash at concat time."""
+        for path in input_paths:
+            try:
+                result = subprocess.run(
+                    [
+                        self._ffprobe, "-v", "error",
+                        "-select_streams", "v:0",
+                        "-show_entries", "stream=sample_aspect_ratio",
+                        "-of", "default=noprint_wrappers=1:nokey=1",
+                        path,
+                    ],
+                    capture_output=True, text=True,
+                )
+                sar = result.stdout.strip()
+            except Exception as exc:
+                _log.info("_warn_on_sar_mismatch: SAR probe failed for %s (%s)", path, exc)
+                continue
+            if sar and sar != "1:1":
+                _log.warning(
+                    "concat_segments_video_only: segment %s has SAR %s (expected 1:1) — "
+                    "concat may reject this batch; check its filter chain routes through "
+                    "ShortsFFmpeg._finalize_filter",
+                    path, sar,
+                )
+
     def concat_segments_video_only(self, input_paths: list[str], output_path: str) -> None:
         """Concatenate already-vertical, already-Ken-Burns'd segment videos (video only)."""
+        self._warn_on_sar_mismatch(input_paths)
         n = len(input_paths)
         concat_inputs = "".join(f"[{i}:v]" for i in range(n))
         filter_complex = f"{concat_inputs}concat=n={n}:v=1:a=0[vout]"
