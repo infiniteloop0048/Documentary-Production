@@ -11,6 +11,8 @@ from docu_studio.shorts.shorts_captions import (
     write_ass_file,
 )
 from docu_studio.shorts.shorts_config import SHORTS_HEIGHT
+from docu_studio.shorts.shorts_cuts import Segment
+from docu_studio.shorts.shorts_sentence_cuts import insert_punch_card_scoped
 
 
 def _fake_timings(words: list[str], word_duration: float = 0.4) -> list[WordTiming]:
@@ -264,3 +266,37 @@ class TestPunchWindowTrimming:
         assert dialogue_lines[0].split(",", 9)[-1] == dialogue_lines[1].split(",", 9)[-1]
         assert "alpha" in dialogue_lines[0]
         assert "beta" in dialogue_lines[2]
+
+
+class TestGaplessOnSentenceScopedPlan:
+    def test_gapless_across_a_sentence_scoped_punch_window(self) -> None:
+        # Build a small sentence-scoped plan (2 sentences), derive a
+        # punch_window from it exactly as assemble_short does, and confirm
+        # generate_ass's gapless invariant still holds end-to-end — segment
+        # boundaries here are sentence-derived, not duration-derived, but
+        # generate_ass only cares about (timings, punch_window), so this
+        # proves the contract between the new planner and the existing
+        # captions pipeline.
+        timings = [
+            WordTiming(word="Ninety", start=0.0, end=0.4),
+            WordTiming(word="percent", start=0.4, end=0.9),
+            WordTiming(word="of", start=0.9, end=1.0),
+            WordTiming(word="oceans", start=1.0, end=1.5),
+            WordTiming(word="unexplored.", start=1.5, end=2.0),
+            WordTiming(word="That", start=2.3, end=2.6),
+            WordTiming(word="changes", start=2.6, end=3.1),
+            WordTiming(word="today.", start=3.1, end=3.6),
+        ]
+        spans = [(0.0, 2.0), (2.0, 6.0)]
+        segments = [
+            Segment(index=0, start=0.0, duration=2.0, clip_index=0, sentence_index=0, pool_source="sentence"),
+            Segment(index=1, start=2.0, duration=4.0, clip_index=0, sentence_index=1, pool_source="sentence"),
+        ]
+        _new_segments, window = insert_punch_card_scoped(segments, punch=(1, "TODAY"), spans=spans)
+        assert window == (5.0, 6.0)
+
+        ass = generate_ass(timings, audio_duration=6.0, punch_window=window)
+        events = _dialogue_times(ass)
+        assert len(events) == len(timings)
+        for (_, end), (next_start, _) in zip(events, events[1:]):
+            assert end == next_start
