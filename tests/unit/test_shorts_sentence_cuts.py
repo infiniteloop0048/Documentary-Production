@@ -7,7 +7,11 @@ from __future__ import annotations
 import pytest
 
 from docu_studio.shorts.shorts_cuts import MIN_SEGMENT_DURATION, Segment
-from docu_studio.shorts.shorts_sentence_cuts import apply_loop_revisit, plan_sentence_scoped_cuts
+from docu_studio.shorts.shorts_sentence_cuts import (
+    apply_loop_revisit,
+    insert_punch_card_scoped,
+    plan_sentence_scoped_cuts,
+)
 
 
 class TestPlanSentenceScopedCuts:
@@ -156,3 +160,79 @@ class TestApplyLoopRevisit:
         result = apply_loop_revisit(segments, total_duration=8.0, sentence_zero_pool_source="sentence")
         assert result == segments
         assert all(not s.loop_revisit for s in result)
+
+
+class TestInsertPunchCardScoped:
+    def test_never_steals_from_a_neighboring_sentences_segment(self) -> None:
+        spans = [(0.0, 3.0), (3.0, 6.0)]
+        segments = [
+            Segment(index=0, start=0.0, duration=3.0, clip_index=0, sentence_index=0, pool_source="sentence"),
+            Segment(index=1, start=3.0, duration=3.0, clip_index=0, sentence_index=1, pool_source="sentence"),
+        ]
+        new_segments, window = insert_punch_card_scoped(segments, punch=(0, "90 PERCENT"), spans=spans)
+        assert window is not None
+        card = next(s for s in new_segments if s.is_punch)
+        assert card.start >= spans[0][0] - 1e-9
+        assert card.start + card.duration <= spans[0][1] + 1e-9
+        sentence1_seg = next(s for s in new_segments if s.sentence_index == 1 and not s.is_punch)
+        assert sentence1_seg.start == pytest.approx(3.0)
+        assert sentence1_seg.duration == pytest.approx(3.0)
+
+    def test_flicker_scenario_short_first_sentence_with_tight_neighbor_is_skipped_cleanly(self) -> None:
+        # The exact production bug: a punch card tied to sentence 0, whose
+        # own span is short (2.5s, single segment), immediately followed by
+        # sentence 1's own tight segment. Old behavior stole down to a 0.3s
+        # sliver right next to sentence 1's cut, causing flicker. New
+        # behavior must skip the card entirely rather than produce that
+        # sliver, since 2.5 - PUNCH_CARD_DURATION_SECONDS(1.0) = 1.5s <
+        # the 2.0s minimum-duration floor.
+        spans = [(0.0, 2.5), (2.5, 5.0)]
+        segments = [
+            Segment(index=0, start=0.0, duration=2.5, clip_index=0, sentence_index=0, pool_source="sentence"),
+            Segment(index=1, start=2.5, duration=2.5, clip_index=0, sentence_index=1, pool_source="sentence"),
+        ]
+        new_segments, window = insert_punch_card_scoped(segments, punch=(0, "90 PERCENT"), spans=spans)
+        assert window is None
+        assert new_segments == segments
+
+    def test_long_first_sentence_fits_the_card_with_a_clean_remainder(self) -> None:
+        # sentence 0 long enough (4.5s single segment) to fit the card
+        # (1.0s) and still leave >= MIN_SEGMENT_DURATION(2.0s) remainder
+        # (3.5s) produces a clean single card segment, not a sliver.
+        spans = [(0.0, 4.5), (4.5, 7.0)]
+        segments = [
+            Segment(index=0, start=0.0, duration=4.5, clip_index=0, sentence_index=0, pool_source="sentence"),
+            Segment(index=1, start=4.5, duration=2.5, clip_index=0, sentence_index=1, pool_source="sentence"),
+        ]
+        new_segments, window = insert_punch_card_scoped(segments, punch=(0, "90 PERCENT"), spans=spans)
+        assert window is not None
+        card = next(s for s in new_segments if s.is_punch)
+        assert card.duration == pytest.approx(1.0)
+        remainder = next(s for s in new_segments if s.sentence_index == 0 and not s.is_punch)
+        assert remainder.duration >= MIN_SEGMENT_DURATION - 1e-9
+
+    def test_skips_gracefully_when_sentence_has_no_segments(self) -> None:
+        spans = [(0.0, 0.0), (0.0, 5.0)]
+        segments = [
+            Segment(index=0, start=0.0, duration=5.0, clip_index=0, sentence_index=1, pool_source="sentence"),
+        ]
+        new_segments, window = insert_punch_card_scoped(segments, punch=(0, "90 PERCENT"), spans=spans)
+        assert window is None
+        assert new_segments == segments
+
+    def test_sentence_index_out_of_range_returns_unchanged(self) -> None:
+        spans = [(0.0, 3.0)]
+        segments = [Segment(index=0, start=0.0, duration=3.0, clip_index=0, sentence_index=0, pool_source="sentence")]
+        new_segments, window = insert_punch_card_scoped(segments, punch=(5, "90 PERCENT"), spans=spans)
+        assert window is None
+        assert new_segments == segments
+
+    def test_loop_revisit_segment_is_never_chosen_as_the_target(self) -> None:
+        spans = [(0.0, 3.0)]
+        segments = [
+            Segment(index=0, start=0.0, duration=3.0, clip_index=0, sentence_index=0,
+                    pool_source="sentence", loop_revisit=True),
+        ]
+        new_segments, window = insert_punch_card_scoped(segments, punch=(0, "90 PERCENT"), spans=spans)
+        assert window is None
+        assert new_segments == segments

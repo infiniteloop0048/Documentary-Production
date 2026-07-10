@@ -124,3 +124,106 @@ def apply_loop_revisit(
         LOOP_REVISIT_DURATION_SECONDS, last.sentence_index,
     )
     return segments[:-1] + [shrunk_last, revisit]
+
+
+PUNCH_CARD_DURATION_SECONDS = 1.0
+_PUNCH_CARD_MIN_DURATION = 0.8
+# The flicker-bug fix: the old global _insert_punch_card allowed a target's
+# remaining duration to shrink to 0.3s, producing a sub-floor sliver of
+# footage right next to the card's hard cuts. This reuses the same
+# MIN_SEGMENT_DURATION floor used everywhere else instead.
+_PUNCH_MIN_REMAINDER = MIN_SEGMENT_DURATION
+
+
+def insert_punch_card_scoped(
+    segments: list[Segment],
+    punch: tuple[int, str],
+    spans: list[tuple[float, float]],
+) -> tuple[list[Segment], tuple[float, float] | None]:
+    """Insert a punch-card Segment for sentence *punch[0]*, drawing its time
+    allocation only from within that sentence's own span
+    [span_start, span_end) — it may shrink or split that sentence's own
+    segment(s), but can never reach into a neighboring sentence's segment.
+    If the sentence's span is too short to fit both the card
+    (PUNCH_CARD_DURATION_SECONDS, floored at _PUNCH_CARD_MIN_DURATION) and
+    leave its target segment at least _PUNCH_MIN_REMAINDER long, the card
+    is skipped for this run (logged) rather than shrinking below that floor
+    or reaching outside the sentence's own span — this is what prevents a
+    punch card from colliding with an adjacent sentence's footage cut into
+    a rapid flicker.
+
+    Returns (segments, (card_start, card_end)) on success, or (segments
+    unchanged, None) if placement isn't possible.
+    """
+    sentence_index, punch_text = punch
+    if sentence_index >= len(spans):
+        return segments, None
+    span_start, span_end = spans[sentence_index]
+
+    candidates = [s for s in segments if not s.loop_revisit and s.sentence_index == sentence_index]
+    if not candidates:
+        _log.info(
+            "Punch card: sentence %d has no segments of its own (empty span or pool) — skipping",
+            sentence_index,
+        )
+        return segments, None
+
+    target = min(candidates, key=lambda s: abs(s.start - span_start))
+
+    card_duration = min(PUNCH_CARD_DURATION_SECONDS, target.duration - _PUNCH_MIN_REMAINDER)
+    if card_duration < _PUNCH_CARD_MIN_DURATION:
+        _log.info(
+            "Punch card: sentence %d's target segment (%.2fs) too short to fit a card "
+            "and keep the %.2fs minimum-duration floor — skipping",
+            sentence_index, target.duration, _PUNCH_MIN_REMAINDER,
+        )
+        return segments, None
+
+    steal_from_start = target.start > span_start + 1e-9
+    if steal_from_start:
+        card_start = target.start
+        new_target = Segment(
+            index=target.index, start=target.start + card_duration,
+            duration=target.duration - card_duration, clip_index=target.clip_index,
+            sentence_index=target.sentence_index, pool_source=target.pool_source,
+        )
+    else:
+        card_start = target.start + target.duration - card_duration
+        if card_start < span_start - 1e-9:
+            _log.info(
+                "Punch card: sentence %d span too short to place card without "
+                "spilling outside its own span — skipping", sentence_index,
+            )
+            return segments, None
+        new_target = Segment(
+            index=target.index, start=target.start,
+            duration=target.duration - card_duration, clip_index=target.clip_index,
+            sentence_index=target.sentence_index, pool_source=target.pool_source,
+        )
+
+    card_segment = Segment(
+        index=target.index, start=card_start, duration=card_duration,
+        clip_index=0, is_punch=True, punch_text=punch_text, sentence_index=sentence_index,
+    )
+
+    new_segments: list[Segment] = []
+    for s in segments:
+        if s is target:
+            if steal_from_start:
+                new_segments.append(card_segment)
+                new_segments.append(new_target)
+            else:
+                new_segments.append(new_target)
+                new_segments.append(card_segment)
+        else:
+            new_segments.append(s)
+
+    reindexed = [
+        Segment(
+            index=i, start=s.start, duration=s.duration, clip_index=s.clip_index,
+            loop_revisit=s.loop_revisit, is_punch=s.is_punch, punch_text=s.punch_text,
+            sentence_index=s.sentence_index, pool_source=s.pool_source,
+        )
+        for i, s in enumerate(new_segments)
+    ]
+    return reindexed, (card_start, card_start + card_duration)
