@@ -12,6 +12,10 @@ from docu_studio.adapters.footage.base import FootageClip, FootageProvider
 from docu_studio.pipeline.events import LogEvent, LogLevel, ProgressEvent
 from docu_studio.pipeline.stages.footage_assembly import download_clip
 from docu_studio.shorts.capability_resolvers import WordTiming, resolve_beat_grid
+from docu_studio.shorts.shorts_footage_download import (
+    build_download_session,
+    download_clip_resilient,
+)
 from docu_studio.shorts.shorts_cuts import (
     MAX_SEGMENT_DURATION,
     MIN_SEGMENT_DURATION,
@@ -192,11 +196,13 @@ def _collect_clips_per_sentence(
                 unique_seen.add(url)
                 unique_order.append(url)
 
+    download_session = build_download_session()
+    last_request_at: dict[str, float] = {}
     path_by_url: dict[str, str] = {}
     for i, url in enumerate(unique_order):
         dest = str(scene_dir / f"short_clip_{i:03d}.mp4")
         try:
-            download_clip(url, dest)
+            download_clip_resilient(download_session, url, dest, last_request_at)
         except Exception as exc:
             _log.info("_collect_clips_per_sentence: download failed for %s (%s) — skipping", url, exc)
             continue

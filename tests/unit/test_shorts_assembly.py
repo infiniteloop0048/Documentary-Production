@@ -433,8 +433,8 @@ class TestCollectClipsPerSentence:
         event_queue: queue.Queue = queue.Queue()
 
         with patch(
-            "docu_studio.shorts.shorts_assembly.download_clip",
-            side_effect=lambda url, dest: Path(dest).write_bytes(b"x"),
+            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            side_effect=lambda session, url, dest, last_request_at=None: Path(dest).write_bytes(b"x"),
         ):
             pools, _fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
 
@@ -455,8 +455,10 @@ class TestCollectClipsPerSentence:
         download_calls: list[str] = []
 
         with patch(
-            "docu_studio.shorts.shorts_assembly.download_clip",
-            side_effect=lambda url, dest: (download_calls.append(url), Path(dest).write_bytes(b"x")),
+            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            side_effect=lambda session, url, dest, last_request_at=None: (
+                download_calls.append(url), Path(dest).write_bytes(b"x"),
+            ),
         ):
             pools, _fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
 
@@ -477,8 +479,8 @@ class TestCollectClipsPerSentence:
         event_queue: queue.Queue = queue.Queue()
 
         with patch(
-            "docu_studio.shorts.shorts_assembly.download_clip",
-            side_effect=lambda url, dest: Path(dest).write_bytes(b"x"),
+            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            side_effect=lambda session, url, dest, last_request_at=None: Path(dest).write_bytes(b"x"),
         ):
             pools, _fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
 
@@ -497,9 +499,36 @@ class TestCollectClipsPerSentence:
         event_queue: queue.Queue = queue.Queue()
 
         with patch(
-            "docu_studio.shorts.shorts_assembly.download_clip",
-            side_effect=lambda url, dest: Path(dest).write_bytes(b"x"),
+            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            side_effect=lambda session, url, dest, last_request_at=None: Path(dest).write_bytes(b"x"),
         ):
             _pools, fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
 
         assert len(fallback) == 1
+
+    def test_all_downloads_in_a_batch_share_one_session_and_pacing_dict(self, tmp_path: Path) -> None:
+        def fake_search(keywords, min_duration, page=1):
+            q = keywords[0]
+            return [FootageClip(url=f"https://cdn/{q}.mp4", duration=30.0, width=1920, height=1080, clip_id=q)]
+
+        provider = MagicMock()
+        provider.search.side_effect = fake_search
+        script = _script(3)
+        event_queue: queue.Queue = queue.Queue()
+        seen_sessions = []
+        seen_pacing_dicts = []
+
+        def fake_download(session, url, dest, last_request_at=None):
+            seen_sessions.append(session)
+            seen_pacing_dicts.append(id(last_request_at))
+            Path(dest).write_bytes(b"x")
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            side_effect=fake_download,
+        ):
+            _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
+
+        assert len(seen_sessions) == 3
+        assert len(set(id(s) for s in seen_sessions)) == 1  # one shared Session for the whole batch
+        assert len(set(seen_pacing_dicts)) == 1  # one shared pacing dict for the whole batch
