@@ -105,8 +105,9 @@ class TestPlanSentenceScopedCuts:
 
 class TestApplyLoopRevisit:
     def test_reserves_final_segment_sourced_from_sentence_zero(self) -> None:
-        spans = [(0.0, 20.0)]
-        segments = plan_sentence_scoped_cuts(spans, pool_sizes=[3], pool_sources=["sentence"], seed=1)
+        segments = [
+            Segment(index=0, start=0.0, duration=20.0, clip_index=0, sentence_index=0, pool_source="sentence"),
+        ]
         result = apply_loop_revisit(segments, total_duration=20.0, sentence_zero_pool_source="sentence")
         last = result[-1]
         assert last.loop_revisit is True
@@ -115,14 +116,16 @@ class TestApplyLoopRevisit:
         assert last.pool_source == "sentence"
 
     def test_revisit_duration_matches_the_reserved_band(self) -> None:
-        spans = [(0.0, 20.0)]
-        segments = plan_sentence_scoped_cuts(spans, pool_sizes=[3], pool_sources=["sentence"], seed=1)
+        segments = [
+            Segment(index=0, start=0.0, duration=20.0, clip_index=0, sentence_index=0, pool_source="sentence"),
+        ]
         result = apply_loop_revisit(segments, total_duration=20.0, sentence_zero_pool_source="sentence")
         assert result[-1].duration == pytest.approx(1.75)
 
     def test_total_duration_preserved(self) -> None:
-        spans = [(0.0, 20.0)]
-        segments = plan_sentence_scoped_cuts(spans, pool_sizes=[3], pool_sources=["sentence"], seed=1)
+        segments = [
+            Segment(index=0, start=0.0, duration=20.0, clip_index=0, sentence_index=0, pool_source="sentence"),
+        ]
         result = apply_loop_revisit(segments, total_duration=20.0, sentence_zero_pool_source="sentence")
         assert sum(s.duration for s in result) == pytest.approx(20.0, abs=0.02)
 
@@ -142,3 +145,14 @@ class TestApplyLoopRevisit:
         segments = plan_sentence_scoped_cuts(spans, pool_sizes=[1], pool_sources=["sentence"], seed=1)
         result = apply_loop_revisit(segments, total_duration=5.0, sentence_zero_pool_source="sentence")
         assert result == segments
+
+    def test_skipped_when_last_segment_too_short_even_when_it_belongs_to_sentence_zero(self) -> None:
+        # Regression test: the last (and only) segment belongs to sentence 0.
+        # Carving 1.75s from its 3.0s duration would leave 1.25s <
+        # MIN_SEGMENT_DURATION (2.0s) — must skip regardless of sentence_index.
+        segments = [
+            Segment(index=0, start=0.0, duration=3.0, clip_index=0, sentence_index=0, pool_source="sentence"),
+        ]
+        result = apply_loop_revisit(segments, total_duration=8.0, sentence_zero_pool_source="sentence")
+        assert result == segments
+        assert all(not s.loop_revisit for s in result)

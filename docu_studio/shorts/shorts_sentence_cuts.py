@@ -102,16 +102,7 @@ def apply_loop_revisit(
 
     last = segments[-1]
     new_last_duration = last.duration - LOOP_REVISIT_DURATION_SECONDS
-    if new_last_duration <= 0:
-        _log.info(
-            "apply_loop_revisit: last segment (%.2fs) too short to carve a %.2fs "
-            "revisit tail — skipping",
-            last.duration, LOOP_REVISIT_DURATION_SECONDS,
-        )
-        return segments
-
-    # Only enforce MIN_SEGMENT_DURATION constraint if last segment is not from sentence 0
-    if last.sentence_index != 0 and new_last_duration < MIN_SEGMENT_DURATION:
+    if new_last_duration < MIN_SEGMENT_DURATION:
         _log.info(
             "apply_loop_revisit: last segment (%.2fs) too short to carve a %.2fs "
             "revisit tail without dropping below the %.2fs floor — skipping",
