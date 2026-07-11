@@ -989,7 +989,8 @@ class TestGenerateSlideshowScript:
         _, kwargs = llm.generate_script.call_args
         prompt = kwargs["topic"]
         assert "descriptive" in prompt.lower()
-        assert "cold-open" not in prompt.lower()
+        assert "no cold-open hook" in prompt.lower()
+        assert "no payoff" in prompt.lower()
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
