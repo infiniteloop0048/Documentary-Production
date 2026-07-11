@@ -52,7 +52,7 @@ class SlideshowFFmpeg(FFmpegWrapper):
         if direction == "in":
             zoom_expr = f"1+{zoom_delta:.2f}*on/{denom}"
         else:
-            zoom_expr = f"1.08-{zoom_delta:.2f}*on/{denom}"
+            zoom_expr = f"{target_zoom}-{zoom_delta:.2f}*on/{denom}"
         x_expr = "iw/2-(iw/zoom/2)"
         y_expr = "ih/2-(ih/zoom/2)"
         upscale_dim = out_width * 4
