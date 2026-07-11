@@ -178,7 +178,12 @@ class TestFetchTopicImages:
             "docu_studio.slideshow.slideshow_photo_download.download_photo_resilient",
             side_effect=lambda session, url, dest, last=None: dest,
         ):
-            paths = fetch_topic_images("mountains", 2, [provider_a, provider_b], tmp_path)
+            # count=3 exceeds the 2 distinct photo_ids (42, 99) present across
+            # all 3 raw results — if dedup were broken, the pool would contain
+            # 3 raw entries and this would download 3 paths; correct dedup
+            # caps the pool at 2 distinct photos, so the partial-success path
+            # returns exactly 2 even though 3 were requested.
+            paths = fetch_topic_images("mountains", 3, [provider_a, provider_b], tmp_path)
 
         assert len(paths) == 2  # only 2 distinct photo_ids exist (42, 99)
 
