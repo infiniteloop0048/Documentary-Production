@@ -65,3 +65,6 @@ build/
 # keyring (never plaintext)
 secrets.json
 api_keys.json
+
+# git worktrees
+.worktrees/
