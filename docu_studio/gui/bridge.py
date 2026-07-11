@@ -386,6 +386,52 @@ class Bridge:
             import traceback
             return {"ok": False, "error": str(exc) + "\n" + traceback.format_exc()}
 
+    def fetch_slideshow_images(self, topic: str, count: int) -> dict:
+        try:
+            import tempfile
+
+            from docu_studio.adapters.photos.factory import build_photo_providers
+            from docu_studio.slideshow.slideshow_photo_download import fetch_topic_images
+
+            pexels_key = key_cache.get("docu_studio_pexels") or ""
+            pixabay_key = key_cache.get("docu_studio_pixabay") or ""
+            providers = build_photo_providers(pexels_key, pixabay_key)
+
+            dest_dir = Path(tempfile.mkdtemp(prefix="docu_studio_slideshow_fetch_"))
+            paths = fetch_topic_images(topic, int(count), providers, dest_dir)
+            message = (
+                f"Fetched {len(paths)} of {count} requested images."
+                if len(paths) < int(count)
+                else f"Fetched {len(paths)} images."
+            )
+            return {"ok": True, "paths": paths, "message": message}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def generate_slideshow_script(self, topic: str, image_count: int) -> dict:
+        try:
+            from docu_studio.adapters.llm.factory import build_llm
+            from docu_studio.slideshow.slideshow_script_gen import (
+                generate_slideshow_script as _generate_slideshow_script,
+            )
+
+            s = self._settings
+            provider = getattr(s, "llm_provider", "Anthropic")
+            model = getattr(s, "llm_model", "claude-sonnet-4-5")
+            key_map = {
+                "Anthropic": key_cache.get("docu_studio_anthropic"),
+                "OpenAI": key_cache.get("docu_studio_openai"),
+                "OpenRouter": key_cache.get("docu_studio_openrouter"),
+                "Groq": key_cache.get("docu_studio_groq"),
+            }
+            llm_key = key_map.get(provider, "") or ""
+            llm = build_llm(provider, llm_key, model)
+
+            script_text = _generate_slideshow_script(topic, int(image_count), llm)
+            return {"ok": True, "script_text": script_text}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def cancel_run(self) -> dict:
         if self._runner:
             try:
