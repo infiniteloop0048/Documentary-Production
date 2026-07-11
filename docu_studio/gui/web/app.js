@@ -213,6 +213,7 @@ function startConfig(mode) {
   _q('captions-row').style.display = mode === 'short' ? '' : 'none';
   _q('music-row').style.display = mode === 'short' ? '' : 'none';
   _q('advanced-row').style.display = mode === 'short' ? '' : 'none';
+  _q('slideshow-topic-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-images-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-script-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-aspect-row').style.display = mode === 'slideshow' ? '' : 'none';
@@ -235,6 +236,12 @@ function _renderSlideshowImages() {
   _slideshowImages.forEach((path, i) => {
     const row = document.createElement('div');
     row.className = 'flex items-center gap-2 bg-input border border-border rounded-lg px-3 py-2 text-sm text-white';
+
+    const thumb = document.createElement('img');
+    thumb.src = 'file://' + path;
+    thumb.className = 'w-10 h-10 object-cover rounded shrink-0';
+    thumb.alt = '';
+    row.appendChild(thumb);
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'flex-1 truncate';
@@ -264,6 +271,7 @@ function _renderSlideshowImages() {
 
     list.appendChild(row);
   });
+  _updateGenerateButtonState();
 }
 
 function _moveSlideshowImage(i, delta) {
@@ -276,6 +284,68 @@ function _moveSlideshowImage(i, delta) {
 function _removeSlideshowImage(i) {
   _slideshowImages.splice(i, 1);
   _renderSlideshowImages();
+}
+
+async function fetchSlideshowTopicImages() {
+  const topic = (_q('slideshow-topic-input')?.value || '').trim();
+  if (!topic) {
+    _q('slideshow-topic-input').focus();
+    _q('slideshow-topic-input').classList.add('border-red-500');
+    return;
+  }
+  const count = Math.min(15, Math.max(3, parseInt(_q('slideshow-fetch-count').value) || 8));
+  const btn = _q('slideshow-fetch-btn');
+  const status = _q('slideshow-fetch-status');
+  btn.disabled = true;
+  btn.textContent = 'Fetching…';
+  status.textContent = '';
+  try {
+    const res = await window.pywebview.api.fetch_slideshow_images(topic, count);
+    if (res.ok) {
+      _slideshowImages = _slideshowImages.concat(res.paths);
+      _renderSlideshowImages();
+      status.textContent = res.message || '';
+    } else {
+      status.textContent = 'Failed to fetch images: ' + (res.error || '');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Fetch images';
+  }
+}
+
+async function generateSlideshowScript() {
+  const topic = (_q('slideshow-topic-input')?.value || '').trim();
+  if (!topic) {
+    _q('slideshow-topic-input').focus();
+    _q('slideshow-topic-input').classList.add('border-red-500');
+    return;
+  }
+  if (_slideshowImages.length === 0) return;
+  const btn = _q('slideshow-generate-btn');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  try {
+    const res = await window.pywebview.api.generate_slideshow_script(topic, _slideshowImages.length);
+    if (res.ok) {
+      _q('slideshow-script-input').value = res.script_text;
+    } else {
+      alert('Failed to generate script: ' + (res.error || ''));
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate with LLM';
+  }
+}
+
+function _updateGenerateButtonState() {
+  const btn = _q('slideshow-generate-btn');
+  if (!btn) return;
+  const enabled = _slideshowImages.length > 0;
+  btn.disabled = !enabled;
+  btn.className = enabled
+    ? 'text-xs font-semibold px-3 py-1.5 rounded-lg bg-card border border-border text-dim hover:text-white hover:border-bstrong transition-colors cursor-pointer'
+    : 'text-xs font-semibold px-3 py-1.5 rounded-lg bg-card border border-border text-faint cursor-not-allowed transition-colors';
 }
 
 function _clampSeconds(s) {
