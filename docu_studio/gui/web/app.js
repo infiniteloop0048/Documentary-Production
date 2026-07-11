@@ -198,18 +198,84 @@ function startConfig(mode) {
     badge.textContent = 'Short / Reel Mode';
     badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-rose-900/40 text-rose-300';
     _q('topic-row').style.display = '';
+  } else if (mode === 'slideshow') {
+    badge.textContent = 'Slideshow Mode';
+    badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-emerald-900/40 text-emerald-300';
+    _q('topic-row').style.display = 'none';
   } else {
     badge.textContent = 'Full Auto Mode';
     badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-purple-900/40 text-purple-300';
     _q('topic-row').style.display = 'none';
   }
-  _q('doc-duration-row').style.display = mode === 'short' ? 'none' : '';
+  _q('doc-duration-row').style.display = (mode === 'short' || mode === 'slideshow') ? 'none' : '';
   _q('short-duration-row').style.display = mode === 'short' ? '' : 'none';
   _q('aspect-row').style.display = mode === 'short' ? '' : 'none';
   _q('captions-row').style.display = mode === 'short' ? '' : 'none';
   _q('music-row').style.display = mode === 'short' ? '' : 'none';
   _q('advanced-row').style.display = mode === 'short' ? '' : 'none';
+  _q('slideshow-images-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-script-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-aspect-row').style.display = mode === 'slideshow' ? '' : 'none';
   showScreen('config');
+}
+
+let _slideshowImages = [];
+
+async function browseSlideshowImages() {
+  const paths = await window.pywebview.api.browse_images();
+  if (paths && paths.length) {
+    _slideshowImages = _slideshowImages.concat(paths);
+    _renderSlideshowImages();
+  }
+}
+
+function _renderSlideshowImages() {
+  const list = _q('slideshow-image-list');
+  list.innerHTML = '';
+  _slideshowImages.forEach((path, i) => {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-2 bg-input border border-border rounded-lg px-3 py-2 text-sm text-white';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'flex-1 truncate';
+    nameSpan.textContent = `${i + 1}. ${path.split(/[\\/]/).pop()}`;
+    row.appendChild(nameSpan);
+
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.className = 'text-faint hover:text-white px-1';
+    upBtn.textContent = '↑';
+    upBtn.onclick = () => _moveSlideshowImage(i, -1);
+    row.appendChild(upBtn);
+
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button';
+    downBtn.className = 'text-faint hover:text-white px-1';
+    downBtn.textContent = '↓';
+    downBtn.onclick = () => _moveSlideshowImage(i, 1);
+    row.appendChild(downBtn);
+
+    const rmBtn = document.createElement('button');
+    rmBtn.type = 'button';
+    rmBtn.className = 'text-faint hover:text-red-400 px-1';
+    rmBtn.textContent = '✕';
+    rmBtn.onclick = () => _removeSlideshowImage(i);
+    row.appendChild(rmBtn);
+
+    list.appendChild(row);
+  });
+}
+
+function _moveSlideshowImage(i, delta) {
+  const j = i + delta;
+  if (j < 0 || j >= _slideshowImages.length) return;
+  [_slideshowImages[i], _slideshowImages[j]] = [_slideshowImages[j], _slideshowImages[i]];
+  _renderSlideshowImages();
+}
+
+function _removeSlideshowImage(i) {
+  _slideshowImages.splice(i, 1);
+  _renderSlideshowImages();
 }
 
 function _clampSeconds(s) {
@@ -233,6 +299,28 @@ function updateShortsDurationHint() {
 
 async function startRun() {
   const topic = (_q('topic-input')?.value || '').trim();
+  if (_runMode === 'slideshow') {
+    const scriptText = (_q('slideshow-script-input')?.value || '').trim();
+    if (!scriptText) {
+      _q('slideshow-script-input').focus();
+      _q('slideshow-script-input').classList.add('border-red-500');
+      return;
+    }
+    if (_slideshowImages.length === 0) {
+      alert('Please choose at least one image.');
+      return;
+    }
+    showScreen('progress');
+    _resetProgress();
+    startPolling();
+    const res = await window.pywebview.api.start_slideshow_run({
+      script_text: scriptText,
+      image_paths: _slideshowImages,
+      aspect_ratio: _q('slideshow-aspect-select').value,
+    });
+    if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
+    return;
+  }
   if (_runMode === 'short') {
     if (!topic) {
       _q('topic-input').focus();
@@ -287,20 +375,21 @@ async function cancelRun() {
 
 const STAGES = ['Script','Scenes','Audio','Keywords','Footage','Sync','Timeline','Done'];
 const SHORT_STAGES = ['Script','TTS','Alignment','Footage','Assembly','Captions & Music','Mux'];
+const SLIDESHOW_STAGES = ['TTS','Assembly','Mux'];
 
 function _resetProgress() {
   _q('progress-title').textContent = 'Generating…';
   _q('log-area').innerHTML = '';
   _q('open-folder-btn').style.display = 'none';
-  const isShort = _runMode === 'short';
-  _q('stage-track').style.display = isShort ? 'none' : '';
-  _q('shorts-stage-track').style.display = isShort ? '' : 'none';
-  const stages = isShort ? SHORT_STAGES : STAGES;
+  _q('stage-track').style.display = (_runMode === 'short' || _runMode === 'slideshow') ? 'none' : '';
+  _q('shorts-stage-track').style.display = _runMode === 'short' ? '' : 'none';
+  _q('slideshow-stage-track').style.display = _runMode === 'slideshow' ? '' : 'none';
+  const stages = _runMode === 'short' ? SHORT_STAGES : _runMode === 'slideshow' ? SLIDESHOW_STAGES : STAGES;
   stages.forEach((_, i) => _setStage(i, 'pending'));
 }
 
 function _setStage(i, state) {
-  const prefix = _runMode === 'short' ? 'short-stage-' : 'stage-';
+  const prefix = _runMode === 'short' ? 'short-stage-' : _runMode === 'slideshow' ? 'slideshow-stage-' : 'stage-';
   const el = _q(prefix + i);
   if (!el) return;
   const base = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ';

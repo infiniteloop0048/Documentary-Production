@@ -37,7 +37,10 @@ class Bridge:
         "assembly": 4, "caption": 5, "music": 5,
         "mux": 6, "done": 6, "complete": 6,
     }
-    _FINAL_STAGE_INDEX_BY_MODE = {"doc": 7, "shorts": 6}
+    _SLIDESHOW_STAGE_MAP = {
+        "tts": 0, "assembly": 1, "mux": 2, "done": 2, "complete": 2,
+    }
+    _FINAL_STAGE_INDEX_BY_MODE = {"doc": 7, "shorts": 6, "slideshow": 2}
 
     def __init__(self):
         self._window: webview.Window | None = None
@@ -326,6 +329,63 @@ class Bridge:
             import traceback
             return {"ok": False, "error": str(exc) + "\n" + traceback.format_exc()}
 
+    def start_slideshow_run(self, config: dict) -> dict:
+        if self._run_thread and self._run_thread.is_alive():
+            return {"ok": False, "error": "A run is already in progress"}
+        try:
+            self._active_mode = "slideshow"
+            from docu_studio.adapters.tts.factory import build_tts
+            from docu_studio.slideshow.slideshow_runner import SlideshowRunner
+
+            s = self._settings
+            tts_prov = getattr(s, "tts_provider", "elevenlabs")
+            tts_key = (
+                key_cache.get("docu_studio_elevenlabs")
+                if tts_prov == "elevenlabs"
+                else key_cache.get("docu_studio_deepgram_key")
+            )
+            tts_voice = getattr(s, "deepgram_voice", "aura-asteria-en")
+            tts = build_tts(tts_prov, tts_key or "", tts_voice)
+
+            while not self._event_q.empty():
+                try:
+                    self._event_q.get_nowait()
+                except queue.Empty:
+                    break
+
+            output_base = (
+                Path(s.output_folder)
+                if getattr(s, "output_folder", None)
+                else Path.home() / "DocuStudio"
+            )
+
+            self._runner = SlideshowRunner(
+                script_text=config.get("script_text", ""),
+                image_paths=list(config.get("image_paths", [])),
+                tts=tts,
+                output_base=output_base,
+                aspect_ratio=config.get("aspect_ratio", "9:16"),
+            )
+
+            def _run() -> None:
+                try:
+                    self._runner.run()
+                except Exception as exc:
+                    import traceback
+                    self._event_q.put({
+                        "type": "error",
+                        "message": str(exc) + "\n" + traceback.format_exc(),
+                    })
+
+            self._run_thread = threading.Thread(target=_run, daemon=True)
+            self._run_thread.start()
+            threading.Thread(target=self._translate_events, daemon=True).start()
+            return {"ok": True}
+
+        except Exception as exc:
+            import traceback
+            return {"ok": False, "error": str(exc) + "\n" + traceback.format_exc()}
+
     def cancel_run(self) -> dict:
         if self._runner:
             try:
@@ -398,7 +458,11 @@ class Bridge:
                     output_path = part.strip()
 
     def _to_js_event(self, event: object) -> dict | None:
-        stage_map = self._SHORTS_STAGE_MAP if self._active_mode == "shorts" else self._STAGE_MAP
+        stage_map = (
+            self._SHORTS_STAGE_MAP if self._active_mode == "shorts"
+            else self._SLIDESHOW_STAGE_MAP if self._active_mode == "slideshow"
+            else self._STAGE_MAP
+        )
         final_idx = self._FINAL_STAGE_INDEX_BY_MODE.get(self._active_mode, 7)
         cname = type(event).__name__.lower()
 
@@ -442,6 +506,16 @@ class Bridge:
             return None
         result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
         return result[0] if result else None
+
+    def browse_images(self) -> list[str]:
+        if not self._window:
+            return []
+        result = self._window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=True,
+            file_types=("Image Files (*.jpg;*.jpeg;*.png;*.webp;*.bmp)", "All files (*.*)"),
+        )
+        return list(result) if result else []
 
     def open_output_folder(self, path: str) -> dict:
         try:
