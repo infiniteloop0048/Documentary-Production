@@ -8,36 +8,12 @@ weighted by word character length.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
 from docu_studio.adapters.tts.base import TTSProvider
+from docu_studio.common.captions import WordTiming, estimate_word_timestamps
 from docu_studio.media.ffmpeg_wrapper import FFmpegWrapper
 
 _log = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class WordTiming:
-    word: str
-    start: float
-    end: float
-
-
-def estimate_word_timestamps(script_text: str, duration: float) -> list[WordTiming]:
-    """Distribute the words of *script_text* across *duration* seconds, weighting
-    each word's time span by its character length (Tier 3 — no audio analysis)."""
-    words = script_text.split()
-    if not words or duration <= 0:
-        return []
-    weights = [len(w) for w in words]
-    total_weight = sum(weights)
-    timestamps: list[WordTiming] = []
-    cursor = 0.0
-    for word, weight in zip(words, weights):
-        span = duration * (weight / total_weight)
-        timestamps.append(WordTiming(word=word, start=cursor, end=cursor + span))
-        cursor += span
-    return timestamps
 
 
 def _tier1_native_timestamps(

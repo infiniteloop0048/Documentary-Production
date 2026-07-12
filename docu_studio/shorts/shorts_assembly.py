@@ -9,6 +9,7 @@ import queue
 from pathlib import Path
 
 from docu_studio.adapters.footage.base import FootageClip, FootageProvider
+from docu_studio.common.captions import write_ass_file
 from docu_studio.common.resilient_download import (
     build_download_session,
     download_resilient,
@@ -16,6 +17,7 @@ from docu_studio.common.resilient_download import (
 from docu_studio.pipeline.events import LogEvent, LogLevel, ProgressEvent
 from docu_studio.pipeline.stages.footage_assembly import download_clip
 from docu_studio.shorts.capability_resolvers import WordTiming, resolve_beat_grid
+from docu_studio.shorts.shorts_config import SHORTS_HEIGHT, SHORTS_WIDTH
 from docu_studio.shorts.shorts_cuts import (
     MAX_SEGMENT_DURATION,
     MIN_SEGMENT_DURATION,
@@ -30,7 +32,6 @@ from docu_studio.shorts.shorts_sentence_cuts import (
 )
 from docu_studio.shorts.shorts_sentence_spans import sentence_spans
 from docu_studio.shorts.music_providers import resolve_music_track
-from docu_studio.shorts.shorts_captions import write_ass_file
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_script_gen import ShortsScript
 
@@ -667,7 +668,8 @@ def assemble_short(
         try:
             ass_path = str(scene_dir / "captions.ass")
             write_ass_file(
-                timestamps, ass_path, audio_duration=audio_duration, punch_window=punch_window,
+                timestamps, ass_path, SHORTS_WIDTH, SHORTS_HEIGHT,
+                audio_duration=audio_duration, punch_window=punch_window,
             )
             captioned_path = str(scene_dir / "short_captioned.mp4")
             ffmpeg.burn_captions(video_for_mux, ass_path, captioned_path)

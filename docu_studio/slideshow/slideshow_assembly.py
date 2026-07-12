@@ -7,8 +7,8 @@ sentence-scoped pool assignment — those solve a problem (aligning per-sentence
 narration to per-sentence *searched* image results) that doesn't exist yet
 with a flat, manually-ordered image list and no topic search. See the Phase 1
 design spec for why this is out of scope here. Phase 3's captions use a
-duration-estimate word timing instead (slideshow_captions.py), which is a
-different thing from that deferred sentence-scoped alignment.
+duration-estimate word timing instead (docu_studio.common.captions), which is
+a different thing from that deferred sentence-scoped alignment.
 """
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ def assemble_slideshow(
         video_path = overlay_path
 
     if captions:
-        from docu_studio.slideshow.slideshow_captions import estimate_word_timestamps, write_ass_file
+        from docu_studio.common.captions import estimate_word_timestamps, write_ass_file
 
         timings = estimate_word_timestamps(script_text, audio_duration)
         ass_path = str(scene_dir / "captions.ass")

@@ -1,31 +1,41 @@
-"""Burned-in "pop" caption generation: groups word-level timings into 2-4 word
-chunks and emits an ASS (Advanced SubStation Alpha) subtitle document with the
-currently-spoken word bolded and briefly scaled up.
+"""Burned-in "pop" caption generation, shared by the Shorts and Slideshow
+pipelines: groups word-level timings into 2-4 word chunks and emits an ASS
+(Advanced SubStation Alpha) subtitle document with the currently-spoken word
+bolded and briefly scaled up.
 
-Pure text generation — no ffmpeg or subprocess calls here; ShortsFFmpeg.burn_captions
-consumes the .ass file this module writes.
+Pure text generation — no ffmpeg or subprocess calls here; ShortsFFmpeg's and
+SlideshowFFmpeg's burn_captions methods both consume the .ass file this
+module writes.
+
+Word-level timing can come from a real alignment tier (Shorts' native-TTS /
+Whisper tiers, resolved in docu_studio.shorts.capability_resolvers, which is
+Shorts-only) or from estimate_word_timestamps() below — a character-length-
+weighted distribution across the narration's measured duration. This is
+Shorts' Tier 3 fallback and Slideshow's only tier (Slideshow's TTS adapters
+expose no native timestamps and, per the Phase 3 design decision, this phase
+does not pull in a Whisper alignment dependency for a first pass at
+captions).
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-
-from docu_studio.shorts.capability_resolvers import WordTiming
-from docu_studio.shorts.shorts_config import SHORTS_HEIGHT, SHORTS_WIDTH
 
 _MIN_GROUP = 2
 _MAX_GROUP = 4
-
-# Platform UI (like/comment/share rail, captions toggle) covers the literal
-# bottom 15% of a Short/Reel — 22% clears that with margin to spare while
-# still reading as "lower-middle", not centered.
-SAFE_AREA_BOTTOM_MARGIN = round(SHORTS_HEIGHT * 0.22)
+_MIN_WORD_DURATION = 0.05  # guards against zero-duration Dialogue lines
 
 # libass resolves this via fontconfig substitution if unavailable on the host,
 # giving effectively a system-safe fallback without a literal comma-list (an
 # ASS style line takes exactly one Fontname, unlike CSS font-family).
 _FONT_NAME = "DejaVu Sans"
 
-_MIN_WORD_DURATION = 0.05  # guards against zero-duration Dialogue lines
+# Platform UI (like/comment/share rail, captions toggle) covers the literal
+# bottom 15% of a Short/Reel — 22% clears that with margin to spare while
+# still reading as "lower-middle", not centered. Expressed as a fraction of
+# out_height (rather than a baked pixel constant) so the same margin ratio
+# holds across callers' differing output dimensions.
+_SAFE_AREA_BOTTOM_FRACTION = 0.22
 
 _ASS_HEADER_TEMPLATE = """[Script Info]
 ScriptType: v4.00+
@@ -41,6 +51,31 @@ Style: Pop,{font},64,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,10
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"""
+
+
+@dataclass(frozen=True)
+class WordTiming:
+    word: str
+    start: float
+    end: float
+
+
+def estimate_word_timestamps(script_text: str, duration: float) -> list[WordTiming]:
+    """Distribute the words of *script_text* across *duration* seconds,
+    weighting each word's time span by its character length (Tier 3 — no
+    audio analysis)."""
+    words = script_text.split()
+    if not words or duration <= 0:
+        return []
+    weights = [len(w) for w in words]
+    total_weight = sum(weights)
+    timestamps: list[WordTiming] = []
+    cursor = 0.0
+    for word, weight in zip(words, weights):
+        span = duration * (weight / total_weight)
+        timestamps.append(WordTiming(word=word, start=cursor, end=cursor + span))
+        cursor += span
+    return timestamps
 
 
 def group_words(timings: list[WordTiming]) -> list[list[WordTiming]]:
@@ -101,19 +136,22 @@ def _render_group_text(group: list[WordTiming], active_index: int) -> str:
 
 def generate_ass(
     timings: list[WordTiming],
+    out_width: int,
+    out_height: int,
     audio_duration: float | None = None,
     punch_window: tuple[float, float] | None = None,
 ) -> str:
-    """Build a full ASS subtitle document from word-level *timings*: words are
-    grouped into 2-4 word "pop caption" chunks, the currently-spoken word in
-    each chunk is bold and briefly scaled up via an ASS \\t transform, and
+    """Build a full ASS subtitle document from word-level *timings*, sized to
+    *out_width*x*out_height* (the caller's actual output dimensions): words
+    are grouped into 2-4 word "pop caption" chunks, the currently-spoken word
+    in each chunk is bold and briefly scaled up via an ASS \\t transform, and
     every line sits inside the lower-middle safe area.
 
-    Events are gapless: each word's Start stays at its own whisper timestamp,
-    but its End is pinned to the *next* word's Start (across group boundaries
-    too), so exactly one Dialogue event is ever active — no flicker between
-    words and no double-blink at group swaps. The very last word's End uses
-    *audio_duration* when given, else falls back to its own whisper end.
+    Events are gapless: each word's Start stays at its own timestamp, but its
+    End is pinned to the *next* word's Start (across group boundaries too),
+    so exactly one Dialogue event is ever active — no flicker between words
+    and no double-blink at group swaps. The very last word's End uses
+    *audio_duration* when given, else falls back to its own timing's end.
 
     *punch_window*, if given, is (card_start, card_end) in seconds: any event
     fully inside that window is dropped (the punch card carries its own text,
@@ -126,9 +164,9 @@ def generate_ass(
     among the remaining events themselves — a gap at the card's own window is
     expected and correct.
     """
+    margin_v = round(out_height * _SAFE_AREA_BOTTOM_FRACTION)
     header = _ASS_HEADER_TEMPLATE.format(
-        width=SHORTS_WIDTH, height=SHORTS_HEIGHT,
-        font=_FONT_NAME, margin_v=SAFE_AREA_BOTTOM_MARGIN,
+        width=out_width, height=out_height, font=_FONT_NAME, margin_v=margin_v,
     )
     lines = [header]
     groups = group_words(timings)
@@ -179,9 +217,12 @@ def generate_ass(
 def write_ass_file(
     timings: list[WordTiming],
     output_path: str,
+    out_width: int,
+    out_height: int,
     audio_duration: float | None = None,
     punch_window: tuple[float, float] | None = None,
 ) -> None:
     Path(output_path).write_text(
-        generate_ass(timings, audio_duration, punch_window), encoding="utf-8"
+        generate_ass(timings, out_width, out_height, audio_duration, punch_window),
+        encoding="utf-8",
     )

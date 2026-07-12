@@ -1,16 +1,32 @@
-"""Unit tests for shorts_captions: ASS subtitle generation for burned-in pop captions."""
+"""Unit tests for common/captions.py — ASS subtitle generation for burned-in
+"pop" captions, shared by the Shorts and Slideshow pipelines.
+
+Union of the test classes formerly duplicated across test_shorts_captions.py
+and test_slideshow_captions.py (deduped where both asserted the same
+behavior — e.g. slideshow's gapless/empty-timings/margin-embedding checks
+were subsumed by shorts' more thorough equivalents once both now share one
+generate_ass). Shorts-flavored tests pass SHORTS_WIDTH/SHORTS_HEIGHT
+(1080x1920, matching Shorts' former hardcoded dimensions); Slideshow-flavored
+tests pass explicit non-default dimensions (e.g. 1920x1080) to exercise the
+width/height parameterization.
+
+TestPunchWindowWithNonDefaultDimensions is new: it exercises punch_window
+together with a non-default out_width/out_height, a combination neither
+source file covered (Shorts never varied dimensions, Slideshow never had
+punch_window) — the one genuinely new scenario this merge creates.
+"""
 from __future__ import annotations
 
 import re
 
-from docu_studio.shorts.capability_resolvers import WordTiming
-from docu_studio.shorts.shorts_captions import (
-    SAFE_AREA_BOTTOM_MARGIN,
+from docu_studio.common.captions import (
+    WordTiming,
+    estimate_word_timestamps,
     generate_ass,
     group_words,
     write_ass_file,
 )
-from docu_studio.shorts.shorts_config import SHORTS_HEIGHT
+from docu_studio.shorts.shorts_config import SHORTS_HEIGHT, SHORTS_WIDTH
 from docu_studio.shorts.shorts_cuts import Segment
 from docu_studio.shorts.shorts_sentence_cuts import insert_punch_card_scoped
 
@@ -41,6 +57,26 @@ def _parse_ass_time(s: str) -> float:
     return int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(cs) / 100
 
 
+class TestEstimateWordTimestamps:
+    def test_distributes_words_across_duration(self) -> None:
+        timings = estimate_word_timestamps("one two three", 9.0)
+        assert len(timings) == 3
+        assert timings[0].start == 0.0
+        assert timings[-1].end == 9.0
+
+    def test_weights_by_character_length(self) -> None:
+        timings = estimate_word_timestamps("a bb", 3.0)
+        span_a = timings[0].end - timings[0].start
+        span_bb = timings[1].end - timings[1].start
+        assert span_bb == 2 * span_a
+
+    def test_empty_script_returns_empty_list(self) -> None:
+        assert estimate_word_timestamps("", 5.0) == []
+
+    def test_zero_duration_returns_empty_list(self) -> None:
+        assert estimate_word_timestamps("hello", 0.0) == []
+
+
 class TestGroupWords:
     def test_empty_returns_empty(self) -> None:
         assert group_words([]) == []
@@ -53,6 +89,11 @@ class TestGroupWords:
             for g in groups:
                 assert 2 <= len(g) <= 4
 
+    def test_groups_of_four_by_default(self) -> None:
+        timings = _fake_timings([f"w{i}" for i in range(8)])
+        groups = group_words(timings)
+        assert [len(g) for g in groups] == [4, 4]
+
     def test_single_word_script_returns_single_group(self) -> None:
         groups = group_words(_fake_timings(["solo"]))
         assert len(groups) == 1
@@ -63,48 +104,6 @@ class TestGroupWords:
         groups = group_words(_fake_timings([f"w{i}" for i in range(13)]))
         assert [len(g) for g in groups] == [4, 4, 3, 2]
 
-
-class TestGenerateAss:
-    def test_contains_required_sections(self) -> None:
-        ass = generate_ass(_fake_timings(["the", "quick", "brown", "fox", "jumps"]))
-        assert "[Script Info]" in ass
-        assert "[V4+ Styles]" in ass
-        assert "[Events]" in ass
-        assert "Style: Pop," in ass
-
-    def test_dialogue_lines_are_word_level(self) -> None:
-        timings = _fake_timings(["the", "quick", "brown", "fox", "jumps"])
-        ass = generate_ass(timings)
-        dialogue_lines = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
-        assert len(dialogue_lines) == len(timings)
-
-    def test_times_are_monotonically_non_decreasing(self) -> None:
-        timings = _fake_timings(["one", "two", "three", "four", "five", "six", "seven"])
-        ass = generate_ass(timings)
-        starts = []
-        for line in ass.splitlines():
-            if line.startswith("Dialogue:"):
-                m = re.match(r"Dialogue: 0,([\d:.]+),", line)
-                starts.append(m.group(1))
-        assert starts == sorted(starts)
-
-    def test_safe_area_margin_clears_bottom_15_percent(self) -> None:
-        assert SAFE_AREA_BOTTOM_MARGIN >= round(SHORTS_HEIGHT * 0.15)
-
-    def test_margin_v_is_embedded_in_style_line(self) -> None:
-        ass = generate_ass(_fake_timings(["hi", "there"]))
-        style_line = next(l for l in ass.splitlines() if l.startswith("Style: Pop,"))
-        fields = style_line.split(",")
-        assert int(fields[-2]) == SAFE_AREA_BOTTOM_MARGIN
-
-    def test_active_word_gets_pop_transform(self) -> None:
-        ass = generate_ass(_fake_timings(["hello", "world"]))
-        assert r"\t(0,60" in ass
-
-    def test_empty_timings_produces_header_only(self) -> None:
-        ass = generate_ass([])
-        assert "Dialogue:" not in ass
-
     def test_2_to_4_word_groups_present_in_a_longer_sentence(self) -> None:
         words = "a short burst of narration with several words in it total".split()
         timings = _fake_timings(words)
@@ -112,8 +111,60 @@ class TestGenerateAss:
         assert all(2 <= len(g) <= 4 for g in groups)
         assert sum(len(g) for g in groups) == len(words)
 
+
+class TestGenerateAss:
+    def test_contains_required_sections(self) -> None:
+        ass = generate_ass(
+            _fake_timings(["the", "quick", "brown", "fox", "jumps"]),
+            SHORTS_WIDTH, SHORTS_HEIGHT,
+        )
+        assert "[Script Info]" in ass
+        assert "[V4+ Styles]" in ass
+        assert "[Events]" in ass
+        assert "Style: Pop," in ass
+
+    def test_header_uses_caller_dimensions(self) -> None:
+        timings = estimate_word_timestamps("hello there", 2.0)
+        doc = generate_ass(timings, out_width=1920, out_height=1080)
+        assert "PlayResX: 1920" in doc
+        assert "PlayResY: 1080" in doc
+
+    def test_dialogue_lines_are_word_level(self) -> None:
+        timings = _fake_timings(["the", "quick", "brown", "fox", "jumps"])
+        ass = generate_ass(timings, SHORTS_WIDTH, SHORTS_HEIGHT)
+        dialogue_lines = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
+        assert len(dialogue_lines) == len(timings)
+
+    def test_times_are_monotonically_non_decreasing(self) -> None:
+        timings = _fake_timings(["one", "two", "three", "four", "five", "six", "seven"])
+        ass = generate_ass(timings, SHORTS_WIDTH, SHORTS_HEIGHT)
+        starts = []
+        for line in ass.splitlines():
+            if line.startswith("Dialogue:"):
+                m = re.match(r"Dialogue: 0,([\d:.]+),", line)
+                starts.append(m.group(1))
+        assert starts == sorted(starts)
+
+    def test_margin_v_is_22_percent_of_height(self) -> None:
+        timings = estimate_word_timestamps("hello there", 2.0)
+        doc = generate_ass(timings, out_width=1080, out_height=1920)
+        # Style line's MarginV is the second-to-last field before Encoding.
+        style_line = next(l for l in doc.splitlines() if l.startswith("Style:"))
+        margin_v = style_line.split(",")[-2]
+        assert margin_v == str(round(1920 * 0.22))
+        # also clears the literal bottom-15%-UI floor the margin exists for
+        assert int(margin_v) >= round(1920 * 0.15)
+
+    def test_active_word_gets_pop_transform(self) -> None:
+        ass = generate_ass(_fake_timings(["hello", "world"]), SHORTS_WIDTH, SHORTS_HEIGHT)
+        assert r"\t(0,60" in ass
+
+    def test_empty_timings_produces_header_only(self) -> None:
+        ass = generate_ass([], SHORTS_WIDTH, SHORTS_HEIGHT)
+        assert "Dialogue:" not in ass
+
     def test_pop_transform_completes_within_120ms(self) -> None:
-        ass = generate_ass(_fake_timings(["hello", "world"]))
+        ass = generate_ass(_fake_timings(["hello", "world"]), SHORTS_WIDTH, SHORTS_HEIGHT)
         assert r"\t(0,60" in ass
         assert r"\t(60,120" in ass
         # old 240ms two-phase transform must be gone
@@ -131,7 +182,9 @@ class TestGaplessEvents:
         timings = _fake_timings(
             ["one", "two", "three", "four", "five", "six", "seven", "eight"]
         )
-        ass = generate_ass(timings, audio_duration=timings[-1].end + 1.0)
+        ass = generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=timings[-1].end + 1.0,
+        )
         events = _dialogue_times(ass)
         assert len(events) == len(timings)
         for (_, end), (next_start, _) in zip(events, events[1:]):
@@ -139,7 +192,7 @@ class TestGaplessEvents:
 
     def test_last_event_extends_to_audio_duration(self) -> None:
         timings = _fake_timings(["only", "two", "words"])
-        ass = generate_ass(timings, audio_duration=5.0)
+        ass = generate_ass(timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=5.0)
         events = _dialogue_times(ass)
         assert events[-1][1] == 5.0
 
@@ -157,7 +210,7 @@ class TestGaplessEvents:
             WordTiming(word="lazy", start=2.50, end=2.88),
             WordTiming(word="dogs", start=2.95, end=3.20),
         ]
-        ass = generate_ass(timings, audio_duration=3.6)
+        ass = generate_ass(timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=3.6)
         events = _dialogue_times(ass)
         assert len(events) == len(timings)
         for (_, end), (next_start, _) in zip(events, events[1:]):
@@ -171,7 +224,9 @@ class TestGaplessEvents:
         timings = _fake_timings([f"w{i}" for i in range(8)])
         groups = group_words(timings)
         assert [len(g) for g in groups] == [4, 4]
-        ass = generate_ass(timings, audio_duration=timings[-1].end + 1.0)
+        ass = generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=timings[-1].end + 1.0,
+        )
         events = _dialogue_times(ass)
         boundary_end = events[3][1]
         next_group_start = events[4][0]
@@ -181,25 +236,37 @@ class TestGaplessEvents:
 class TestWriteAssFile:
     def test_writes_readable_utf8_file(self, tmp_path) -> None:
         out = tmp_path / "captions.ass"
-        write_ass_file(_fake_timings(["hello", "world"]), str(out))
+        write_ass_file(_fake_timings(["hello", "world"]), str(out), SHORTS_WIDTH, SHORTS_HEIGHT)
         content = out.read_text(encoding="utf-8")
         assert "[Script Info]" in content
         assert "Dialogue:" in content
+
+    def test_writes_utf8_file_with_slideshow_dimensions(self, tmp_path) -> None:
+        timings = estimate_word_timestamps("hi there", 2.0)
+        out = tmp_path / "captions.ass"
+        write_ass_file(timings, str(out), 1080, 1920)
+        assert out.exists()
+        assert "Dialogue:" in out.read_text(encoding="utf-8")
 
 
 class TestPunchWindowTrimming:
     def test_event_fully_inside_card_window_is_dropped(self) -> None:
         timings = _fake_timings(["one", "two", "three", "four"], word_duration=0.5)
         # words at [0,0.5), [0.5,1.0), [1.0,1.5), [1.5,2.0) roughly (gapless End=next Start)
-        ass = generate_ass(timings, audio_duration=2.5, punch_window=(0.4, 1.6))
+        ass = generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT,
+            audio_duration=2.5, punch_window=(0.4, 1.6),
+        )
         dialogue_lines = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
         # "two" ([0.5,1.0)) and "three" ([1.0,1.5)) fall fully inside (0.4,1.6) -> dropped
         assert len(dialogue_lines) < len(timings)
 
     def test_event_outside_card_window_is_unaffected(self) -> None:
         timings = _fake_timings(["one", "two", "three"], word_duration=0.5)
-        ass_without = generate_ass(timings, audio_duration=2.0)
-        ass_with = generate_ass(timings, audio_duration=2.0, punch_window=(5.0, 6.0))
+        ass_without = generate_ass(timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=2.0)
+        ass_with = generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=2.0, punch_window=(5.0, 6.0),
+        )
         assert ass_without == ass_with
 
     def test_event_overlapping_start_edge_is_clamped(self) -> None:
@@ -208,7 +275,9 @@ class TestPunchWindowTrimming:
             WordTiming(word="beta", start=1.0, end=1.9),
         ]
         # card starts mid-way through "alpha"'s [0.0, 1.0) span (gapless End = next Start = 1.0)
-        ass = generate_ass(timings, audio_duration=2.0, punch_window=(0.5, 1.5))
+        ass = generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=2.0, punch_window=(0.5, 1.5),
+        )
         events = _dialogue_times(ass)
         # "alpha"'s event must end at or before the card start
         assert events[0][1] <= 0.5
@@ -218,7 +287,9 @@ class TestPunchWindowTrimming:
             WordTiming(word="alpha", start=0.0, end=0.9),
             WordTiming(word="beta", start=1.0, end=1.9),
         ]
-        ass = generate_ass(timings, audio_duration=2.0, punch_window=(0.5, 1.5))
+        ass = generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=2.0, punch_window=(0.5, 1.5),
+        )
         events = _dialogue_times(ass)
         # "beta" starts inside the card window (1.0 in [0.5,1.5)) -> either dropped
         # or its Start clamped to >= 1.5
@@ -227,8 +298,10 @@ class TestPunchWindowTrimming:
 
     def test_no_punch_window_matches_original_output(self) -> None:
         timings = _fake_timings(["one", "two", "three"])
-        assert generate_ass(timings, audio_duration=2.0) == generate_ass(
-            timings, audio_duration=2.0, punch_window=None,
+        assert generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=2.0,
+        ) == generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=2.0, punch_window=None,
         )
 
     def test_gapless_invariant_preserved_between_kept_events_outside_window(self) -> None:
@@ -236,7 +309,10 @@ class TestPunchWindowTrimming:
             ["one", "two", "three", "four", "five", "six", "seven", "eight"], word_duration=0.3,
         )
         # card window sits entirely after all these words -> nothing should change
-        ass = generate_ass(timings, audio_duration=timings[-1].end + 1.0, punch_window=(50.0, 51.0))
+        ass = generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT,
+            audio_duration=timings[-1].end + 1.0, punch_window=(50.0, 51.0),
+        )
         events = _dialogue_times(ass)
         for (_, end), (next_start, _) in zip(events, events[1:]):
             assert end == next_start
@@ -253,7 +329,9 @@ class TestPunchWindowTrimming:
             WordTiming(word="alpha", start=0.3, end=0.3),  # end unused; gapless End = next Start
             WordTiming(word="beta", start=1.7, end=1.7),
         ]
-        ass = generate_ass(timings, audio_duration=2.0, punch_window=(0.5, 1.5))
+        ass = generate_ass(
+            timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=2.0, punch_window=(0.5, 1.5),
+        )
         events = _dialogue_times(ass)
         assert len(events) == 3
         assert events[0] == (0.3, 0.5)
@@ -266,6 +344,49 @@ class TestPunchWindowTrimming:
         assert dialogue_lines[0].split(",", 9)[-1] == dialogue_lines[1].split(",", 9)[-1]
         assert "alpha" in dialogue_lines[0]
         assert "beta" in dialogue_lines[2]
+
+
+class TestPunchWindowWithNonDefaultDimensions:
+    """The one combination neither source test file covered: Shorts never
+    varies out_width/out_height (always 1080x1920) and Slideshow never uses
+    punch_window — this is the new scenario the merge into one
+    width/height-parameterized generate_ass creates."""
+
+    def test_punch_window_trimming_and_dimensions_both_apply(self) -> None:
+        timings = _fake_timings(["one", "two", "three", "four"], word_duration=0.5)
+        ass = generate_ass(
+            timings, out_width=1920, out_height=1080,
+            audio_duration=2.5, punch_window=(0.4, 1.6),
+        )
+        # dimensions land in the header exactly as requested, independent of
+        # the punch_window branch being exercised
+        assert "PlayResX: 1920" in ass
+        assert "PlayResY: 1080" in ass
+        style_line = next(l for l in ass.splitlines() if l.startswith("Style:"))
+        margin_v = style_line.split(",")[-2]
+        assert margin_v == str(round(1080 * 0.22))
+        # "two" ([0.5,1.0)) and "three" ([1.0,1.5)) fall fully inside
+        # (0.4, 1.6) -> dropped, same behavior as the 1080x1920 Shorts case
+        dialogue_lines = [l for l in ass.splitlines() if l.startswith("Dialogue:")]
+        assert len(dialogue_lines) < len(timings)
+
+    def test_split_event_at_non_default_dimensions(self) -> None:
+        # Same straddling-split scenario as TestPunchWindowTrimming's
+        # equivalent, but at 16:9 dimensions, to prove the split/clamp/drop
+        # logic doesn't implicitly depend on Shorts' 9:16 aspect ratio.
+        timings = [
+            WordTiming(word="alpha", start=0.3, end=0.3),
+            WordTiming(word="beta", start=1.7, end=1.7),
+        ]
+        ass = generate_ass(
+            timings, out_width=1920, out_height=1080,
+            audio_duration=2.0, punch_window=(0.5, 1.5),
+        )
+        events = _dialogue_times(ass)
+        assert len(events) == 3
+        assert events[0] == (0.3, 0.5)
+        assert events[1] == (1.5, 1.7)
+        assert events[2] == (1.7, 2.0)
 
 
 class TestGaplessOnSentenceScopedPlan:
@@ -295,7 +416,7 @@ class TestGaplessOnSentenceScopedPlan:
         _new_segments, window = insert_punch_card_scoped(segments, punch=(1, "TODAY"), spans=spans)
         assert window == (5.0, 6.0)
 
-        ass = generate_ass(timings, audio_duration=6.0, punch_window=window)
+        ass = generate_ass(timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=6.0, punch_window=window)
         events = _dialogue_times(ass)
         assert len(events) == len(timings)
         for (_, end), (next_start, _) in zip(events, events[1:]):
