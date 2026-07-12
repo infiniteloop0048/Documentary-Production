@@ -118,7 +118,11 @@ def assemble_slideshow(
     event_queue.put(ProgressEvent(stage="Slideshow Mux", message="Muxing final slideshow…"))
     narration_path = audio_path
     if music_path:
-        mixed_audio_path = str(scene_dir / "narration_with_music.mp3")
+        # .m4a, not .mp3: mix_music_bed encodes with -c:a aac, and ffmpeg's
+        # mp3 muxer rejects AAC-encoded data written to a .mp3-named output
+        # (confirmed by a real pipeline run — the mocked unit tests can't
+        # catch a container/codec mismatch since they never execute ffmpeg).
+        mixed_audio_path = str(scene_dir / "narration_with_music.m4a")
         ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio_path)
         narration_path = mixed_audio_path
     ffmpeg.mux_audio_video(video_path, narration_path, str(output_path))

@@ -278,11 +278,11 @@ class TestAssembleSlideshowMusic:
             music_path="/music/track.mp3",
         )
         ffmpeg.mix_music_bed.assert_called_once_with(
-            "/narration.mp3", "/music/track.mp3", 3.0, str(tmp_path / "narration_with_music.mp3"),
+            "/narration.mp3", "/music/track.mp3", 3.0, str(tmp_path / "narration_with_music.m4a"),
         )
         ffmpeg.mux_audio_video.assert_called_once_with(
             str(tmp_path / "slideshow_concat.mp4"),
-            str(tmp_path / "narration_with_music.mp3"),
+            str(tmp_path / "narration_with_music.m4a"),
             str(tmp_path / "final.mp4"),
         )
 
