@@ -96,3 +96,48 @@ class TestConcatSegmentsVideoOnly:
         filter_complex = cmd[cmd.index("-filter_complex") + 1]
         assert filter_complex == "[0:v][1:v][2:v]concat=n=3:v=1:a=0[vout]"
         assert cmd.count("-i") == 3
+
+
+class TestXfadeOffsets:
+    def test_two_segments(self) -> None:
+        # seg0=3.5s, seg1=3.0s, transition=0.5s -> offset = 3.5 - 0.5 = 3.0
+        offsets = SlideshowFFmpeg._xfade_offsets([3.5, 3.0], 0.5)
+        assert offsets == pytest.approx([3.0])
+
+    def test_three_segments_offsets_are_cumulative(self) -> None:
+        # base [3,3,3] inflated to [3.5, 3.5, 3] by concat_segments_with_xfade's
+        # caller (slideshow_assembly.crossfade_segment_durations) before this
+        # method ever sees them.
+        offsets = SlideshowFFmpeg._xfade_offsets([3.5, 3.5, 3.0], 0.5)
+        assert offsets == pytest.approx([3.0, 6.0])
+
+
+class TestConcatSegmentsWithXfade:
+    def test_requires_at_least_two_segments(self, wrapper: SlideshowFFmpeg) -> None:
+        with pytest.raises(ValueError, match="at least 2"):
+            wrapper.concat_segments_with_xfade(["/a.mp4"], [3.0], 0.5, "/out.mp4")
+
+    def test_builds_chained_xfade_filter_complex(self, wrapper: SlideshowFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.concat_segments_with_xfade(
+                ["/a.mp4", "/b.mp4", "/c.mp4"], [3.5, 3.5, 3.0], 0.5, "/out.mp4",
+            )
+        cmd = mock_run.call_args[0][0]
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        assert filter_complex == (
+            "[0:v][1:v]xfade=transition=fade:duration=0.50:offset=3.000[x1];"
+            "[x1][2:v]xfade=transition=fade:duration=0.50:offset=6.000,"
+            "setsar=1,format=yuv420p[vout]"
+        )
+        assert cmd[cmd.index("-map") + 1] == "[vout]"
+        assert cmd.count("-i") == 3
+
+    def test_raises_ffmpeg_error_on_nonzero_exit(self, wrapper: SlideshowFFmpeg) -> None:
+        from docu_studio.media.ffmpeg_wrapper import FFmpegError
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="xfade boom")
+            with pytest.raises(FFmpegError, match="xfade boom"):
+                wrapper.concat_segments_with_xfade(
+                    ["/a.mp4", "/b.mp4"], [3.5, 3.0], 0.5, "/out.mp4",
+                )
