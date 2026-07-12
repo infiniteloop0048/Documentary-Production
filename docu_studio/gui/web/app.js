@@ -243,6 +243,20 @@ function startConfig(mode) {
 
 let _slideshowImages = [];
 
+// Build a file:// URL from a raw OS filesystem path, percent-encoding each
+// path segment so characters that are reserved in URLs (space, #, ?, &, %,
+// non-ASCII) don't corrupt or truncate the path. Preserves a Windows drive
+// letter segment (e.g. "C:") unencoded since Chromium's file-URL parser only
+// recognizes it in that literal form.
+function _toFileUrl(path) {
+  const normalized = path.replace(/\\/g, '/');
+  const encoded = normalized
+    .split('/')
+    .map((segment, i) => (i === 0 && /^[a-zA-Z]:$/.test(segment) ? segment : encodeURIComponent(segment)))
+    .join('/');
+  return 'file://' + (encoded.startsWith('/') ? encoded : '/' + encoded);
+}
+
 async function browseSlideshowImages() {
   const paths = await window.pywebview.api.browse_images();
   if (paths && paths.length) {
@@ -259,7 +273,7 @@ function _renderSlideshowImages() {
     row.className = 'flex items-center gap-2 bg-input border border-border rounded-lg px-3 py-2 text-sm text-white';
 
     const thumb = document.createElement('img');
-    thumb.src = 'file://' + path;
+    thumb.src = _toFileUrl(path);
     thumb.className = 'w-10 h-10 object-cover rounded shrink-0';
     thumb.alt = '';
     row.appendChild(thumb);
