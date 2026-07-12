@@ -38,3 +38,34 @@ class TestSlideshowConfig:
 
     def test_all_known_aspect_ratios_present(self) -> None:
         assert set(SLIDESHOW_ASPECT_DIMENSIONS) == {"9:16", "16:9", "1:1"}
+
+
+class TestPhase3Fields:
+    def test_defaults_match_phase1_phase2_behavior(self) -> None:
+        cfg = SlideshowConfig(script_text="Hi.", image_paths=["/a.jpg"])
+        assert cfg.transition == "cut"
+        assert cfg.vignette is False
+        assert cfg.grain is False
+        assert cfg.captions is False
+        assert cfg.music_enabled is False
+        assert cfg.music_provider == "jamendo"
+        assert cfg.music_folder == ""
+        assert cfg.jamendo_client_id == ""
+
+    def test_crossfade_transition_accepted(self) -> None:
+        cfg = SlideshowConfig(script_text="Hi.", image_paths=["/a.jpg"], transition="crossfade")
+        assert cfg.transition == "crossfade"
+
+    def test_unknown_transition_raises(self) -> None:
+        with pytest.raises(ValueError, match="transition"):
+            SlideshowConfig(script_text="Hi.", image_paths=["/a.jpg"], transition="wipe")
+
+    def test_local_folder_music_provider_accepted(self) -> None:
+        cfg = SlideshowConfig(
+            script_text="Hi.", image_paths=["/a.jpg"], music_provider="local_folder",
+        )
+        assert cfg.music_provider == "local_folder"
+
+    def test_unknown_music_provider_raises(self) -> None:
+        with pytest.raises(ValueError, match="music_provider"):
+            SlideshowConfig(script_text="Hi.", image_paths=["/a.jpg"], music_provider="spotify")
