@@ -116,6 +116,21 @@ function onMusicProviderChange(provider) {
   _q('jamendo-key-row').style.display = provider === 'jamendo' ? '' : 'none';
 }
 
+function onSlideshowMusicToggleChange() {
+  const on = _q('slideshow-music-toggle').checked;
+  _q('slideshow-music-provider-row').style.display = on ? '' : 'none';
+  if (on) onSlideshowMusicProviderChange(_q('slideshow-music-provider-select').value);
+}
+
+function onSlideshowMusicProviderChange(provider) {
+  _q('slideshow-music-folder-row').style.display = provider === 'local_folder' ? '' : 'none';
+}
+
+async function browseSlideshowMusicFolder() {
+  const path = await window.pywebview.api.browse_folder();
+  if (path) _q('slideshow-music-folder').value = path;
+}
+
 async function saveSettings() {
   const btn = _q('save-btn');
   btn.textContent = 'Saving…'; btn.disabled = true;
@@ -217,6 +232,12 @@ function startConfig(mode) {
   _q('slideshow-images-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-script-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-aspect-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-transition-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-vignette-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-grain-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-captions-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-music-row').style.display = mode === 'slideshow' ? '' : 'none';
+  onSlideshowMusicToggleChange();
   showScreen('config');
 }
 
@@ -387,6 +408,13 @@ async function startRun() {
       script_text: scriptText,
       image_paths: _slideshowImages,
       aspect_ratio: _q('slideshow-aspect-select').value,
+      transition: _q('slideshow-transition-select').value,
+      vignette: _q('slideshow-vignette-toggle').checked,
+      grain: _q('slideshow-grain-toggle').checked,
+      captions: _q('slideshow-captions-toggle').checked,
+      music_enabled: _q('slideshow-music-toggle').checked,
+      music_provider: _q('slideshow-music-provider-select').value,
+      music_folder: _q('slideshow-music-folder').value,
     });
     if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
     return;
