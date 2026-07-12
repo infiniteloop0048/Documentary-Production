@@ -15,6 +15,7 @@ separate pre-crop pass).
 """
 from __future__ import annotations
 
+import os
 import subprocess
 
 from docu_studio.media.ffmpeg_wrapper import FFmpegWrapper
@@ -192,3 +193,37 @@ class SlideshowFFmpeg(FFmpegWrapper):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         self._check(result, f"apply_overlays → {output_path!r}")
+
+    def burn_captions(self, input_path: str, ass_path: str, output_path: str) -> None:
+        """Burn *ass_path* (ASS pop-caption subtitles) into *input_path* via
+        ffmpeg's subtitles filter. *input_path* here is video-only — no
+        audio stream to preserve at this stage (captions burn in before mux).
+
+        Same cwd-relative-filename technique as ShortsFFmpeg.burn_captions:
+        ffmpeg's -vf value is parsed by the avfilter graph description parser,
+        which splits on unescaped ':' — this breaks on any colon in the path.
+        Sidestepping it: run ffmpeg with cwd set to the subtitle file's own
+        directory and reference only its bare filename in the filter string.
+        input_path/output_path are unaffected — they're plain argv values.
+
+        Also runs through _finalize_filter like every other new re-encoding
+        path in this phase: the subtitles filter itself can't introduce SAR
+        drift (it draws an overlay, it doesn't scale), so this is stricter
+        than strictly required, but it keeps the SAR/pixfmt discipline
+        uniform across every method instead of leaving one silent exception
+        a future reader would have to know Shorts' history to trust.
+        """
+        ass_dir = os.path.dirname(ass_path) or "."
+        ass_name = os.path.basename(ass_path)
+        vf = self._finalize_filter(f"subtitles={ass_name}")
+        cmd = [
+            self._ffmpeg, "-y",
+            "-i", os.path.abspath(input_path),
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "22",
+            os.path.abspath(output_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=ass_dir)
+        self._check(result, f"burn_captions → {output_path!r}")

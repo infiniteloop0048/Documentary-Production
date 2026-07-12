@@ -175,3 +175,32 @@ class TestApplyOverlays:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="overlay boom")
             with pytest.raises(FFmpegError, match="overlay boom"):
                 wrapper.apply_overlays("/in.mp4", "/out.mp4", vignette=True, grain=False)
+
+
+class TestBurnCaptions:
+    def test_uses_subtitles_filter_with_bare_filename(self, wrapper: SlideshowFFmpeg, tmp_path) -> None:
+        ass_path = tmp_path / "captions.ass"
+        ass_path.write_text("[Script Info]\n", encoding="utf-8")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.burn_captions(str(tmp_path / "in.mp4"), str(ass_path), str(tmp_path / "out.mp4"))
+        cmd = mock_run.call_args[0][0]
+        vf = cmd[cmd.index("-vf") + 1]
+        assert vf == "subtitles=captions.ass,setsar=1,format=yuv420p"
+
+    def test_runs_with_cwd_set_to_ass_directory(self, wrapper: SlideshowFFmpeg, tmp_path) -> None:
+        ass_path = tmp_path / "captions.ass"
+        ass_path.write_text("[Script Info]\n", encoding="utf-8")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.burn_captions(str(tmp_path / "in.mp4"), str(ass_path), str(tmp_path / "out.mp4"))
+        assert mock_run.call_args.kwargs["cwd"] == str(tmp_path)
+
+    def test_raises_ffmpeg_error_on_nonzero_exit(self, wrapper: SlideshowFFmpeg, tmp_path) -> None:
+        from docu_studio.media.ffmpeg_wrapper import FFmpegError
+        ass_path = tmp_path / "captions.ass"
+        ass_path.write_text("[Script Info]\n", encoding="utf-8")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="subtitles boom")
+            with pytest.raises(FFmpegError, match="subtitles boom"):
+                wrapper.burn_captions(str(tmp_path / "in.mp4"), str(ass_path), str(tmp_path / "out.mp4"))
