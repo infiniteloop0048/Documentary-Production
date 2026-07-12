@@ -141,3 +141,37 @@ class TestConcatSegmentsWithXfade:
                 wrapper.concat_segments_with_xfade(
                     ["/a.mp4", "/b.mp4"], [3.5, 3.0], 0.5, "/out.mp4",
                 )
+
+
+class TestApplyOverlays:
+    def test_raises_when_neither_flag_set(self, wrapper: SlideshowFFmpeg) -> None:
+        with pytest.raises(ValueError, match="at least one"):
+            wrapper.apply_overlays("/in.mp4", "/out.mp4", vignette=False, grain=False)
+
+    def test_vignette_only(self, wrapper: SlideshowFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_overlays("/in.mp4", "/out.mp4", vignette=True, grain=False)
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert vf == "vignette,setsar=1,format=yuv420p"
+
+    def test_grain_only(self, wrapper: SlideshowFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_overlays("/in.mp4", "/out.mp4", vignette=False, grain=True)
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert vf == "noise=alls=8:allf=t,setsar=1,format=yuv420p"
+
+    def test_both_combined_in_order(self, wrapper: SlideshowFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_overlays("/in.mp4", "/out.mp4", vignette=True, grain=True)
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert vf == "vignette,noise=alls=8:allf=t,setsar=1,format=yuv420p"
+
+    def test_raises_ffmpeg_error_on_nonzero_exit(self, wrapper: SlideshowFFmpeg) -> None:
+        from docu_studio.media.ffmpeg_wrapper import FFmpegError
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="overlay boom")
+            with pytest.raises(FFmpegError, match="overlay boom"):
+                wrapper.apply_overlays("/in.mp4", "/out.mp4", vignette=True, grain=False)

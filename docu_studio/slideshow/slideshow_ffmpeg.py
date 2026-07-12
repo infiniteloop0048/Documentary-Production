@@ -163,3 +163,32 @@ class SlideshowFFmpeg(FFmpegWrapper):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         self._check(result, f"concat_segments_video_only → {output_path!r}")
+
+    def apply_overlays(
+        self, input_path: str, output_path: str, vignette: bool, grain: bool,
+    ) -> None:
+        """Apply optional vignette and/or subtle film grain as a single
+        ffmpeg pass. Caller (slideshow_assembly) only invokes this when at
+        least one flag is set — both False is a caller contract violation,
+        not a silent no-op, so it's guarded here rather than left to produce
+        a wasted identity encode."""
+        if not vignette and not grain:
+            raise ValueError("apply_overlays requires at least one of vignette/grain to be True")
+        filters = []
+        if vignette:
+            filters.append("vignette")
+        if grain:
+            # alls=8 is a subtle grain amount, not ffmpeg's heavier default.
+            filters.append("noise=alls=8:allf=t")
+        vf = self._finalize_filter(",".join(filters))
+        cmd = [
+            self._ffmpeg, "-y",
+            "-i", input_path,
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "22",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        self._check(result, f"apply_overlays → {output_path!r}")
