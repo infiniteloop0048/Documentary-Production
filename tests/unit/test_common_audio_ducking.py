@@ -1,7 +1,12 @@
-"""Unit tests for the shorts music-bed ducking filtergraph string construction."""
+"""Unit tests for the shared music-bed ducking filtergraph string construction.
+
+Union of the former test_shorts_audio_mix.py and test_slideshow_audio_mix.py
+cases (deduped where both files asserted the same behavior with only a
+different duration value).
+"""
 from __future__ import annotations
 
-from docu_studio.shorts.shorts_audio_mix import build_ducking_filtergraph
+from docu_studio.common.audio_ducking import build_ducking_filtergraph
 
 
 class TestBuildDuckingFiltergraph:
@@ -43,3 +48,7 @@ class TestBuildDuckingFiltergraph:
     def test_baseline_volume_reduction_is_within_spec_range(self) -> None:
         graph = build_ducking_filtergraph(30.0)
         assert "volume=-20dB" in graph  # within the -18 to -22 dB spec range
+
+    def test_amix_normalize_disabled_so_voice_stays_dominant(self) -> None:
+        graph = build_ducking_filtergraph(10.0)
+        assert "amix=inputs=2:duration=first:normalize=0[aout]" in graph

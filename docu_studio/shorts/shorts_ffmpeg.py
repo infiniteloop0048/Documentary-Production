@@ -486,7 +486,7 @@ class ShortsFFmpeg(FFmpegWrapper):
         *output_path* as a standalone audio file — the caller (assemble_short)
         passes this into mux_shorts_audio exactly as it would the raw voice
         track, so that method's -map discipline never needs to change."""
-        from docu_studio.shorts.shorts_audio_mix import build_ducking_filtergraph
+        from docu_studio.common.audio_ducking import build_ducking_filtergraph
 
         filter_complex = build_ducking_filtergraph(video_duration)
         cmd = [

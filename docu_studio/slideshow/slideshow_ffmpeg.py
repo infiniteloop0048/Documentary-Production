@@ -237,7 +237,7 @@ class SlideshowFFmpeg(FFmpegWrapper):
         (slideshow_assembly) passes this into mux_audio_video exactly as it
         would the raw narration track, so that method's -map discipline
         never needs to change."""
-        from docu_studio.slideshow.slideshow_audio_mix import build_ducking_filtergraph
+        from docu_studio.common.audio_ducking import build_ducking_filtergraph
 
         filter_complex = build_ducking_filtergraph(video_duration)
         cmd = [

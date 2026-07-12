@@ -1,8 +1,8 @@
-"""Pure ffmpeg filtergraph construction for shorts music-bed mixing.
+"""Pure ffmpeg filtergraph construction for music-bed ducking.
 
 Kept as pure string building (no subprocess) so the ducking graph is directly
-unit-testable — ShortsFFmpeg.mix_music_bed is the only caller that actually
-invokes ffmpeg with this string.
+unit-testable — ShortsFFmpeg.mix_music_bed and SlideshowFFmpeg.mix_music_bed
+are the only callers that actually invoke ffmpeg with this string.
 """
 from __future__ import annotations
 
