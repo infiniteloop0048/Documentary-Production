@@ -1,11 +1,14 @@
 """Audio-first assembly for Slideshow: TTS duration -> even image split ->
-Ken Burns -> hard-cut concat -> mux narration audio over the result.
+Ken Burns -> concat (hard cut or crossfade) -> overlays -> captions -> mux
+narration (+ music) over the result.
 
-Deliberately does not use sentence_spans()/word-timing/sentence-scoped pool
-assignment — those solve a problem (aligning per-sentence narration to
-per-sentence *searched* image results) that doesn't exist yet with a flat,
-manually-ordered image list and no topic search. See the Phase 1 design
-spec for why this is out of scope here.
+Deliberately does not use sentence_spans()/audio-aligned word-timing/
+sentence-scoped pool assignment — those solve a problem (aligning per-sentence
+narration to per-sentence *searched* image results) that doesn't exist yet
+with a flat, manually-ordered image list and no topic search. See the Phase 1
+design spec for why this is out of scope here. Phase 3's captions use a
+duration-estimate word timing instead (slideshow_captions.py), which is a
+different thing from that deferred sentence-scoped alignment.
 """
 from __future__ import annotations
 
@@ -17,6 +20,8 @@ from docu_studio.slideshow.slideshow_ffmpeg import SlideshowFFmpeg
 from docu_studio.slideshow.slideshow_motion import direction_for_index
 
 _log = logging.getLogger(__name__)
+
+_TRANSITION_DURATION = 0.5
 
 
 def split_duration_evenly(total_duration: float, count: int) -> list[float]:
@@ -32,6 +37,17 @@ def split_duration_evenly(total_duration: float, count: int) -> list[float]:
     return durations
 
 
+def crossfade_segment_durations(base_durations: list[float], transition_duration: float) -> list[float]:
+    """Inflate every segment except the last by *transition_duration*
+    seconds. Chaining N-1 xfade merges each shortens the timeline by
+    *transition_duration*, so inflating N-1 of the N segments by that amount
+    means the post-crossfade total still equals sum(base_durations) exactly
+    — no shrinkage relative to the narration's measured length."""
+    if len(base_durations) < 2:
+        return list(base_durations)
+    return [d + transition_duration for d in base_durations[:-1]] + [base_durations[-1]]
+
+
 def assemble_slideshow(
     image_paths: list[str],
     audio_path: str,
@@ -42,11 +58,19 @@ def assemble_slideshow(
     out_width: int,
     out_height: int,
     event_queue,
+    transition: str = "cut",
+    vignette: bool = False,
+    grain: bool = False,
+    captions: bool = False,
+    script_text: str = "",
+    music_path: str | None = None,
 ) -> None:
-    """Build the final slideshow video: one Ken-Burns segment per image,
-    durations evenly splitting *audio_duration*, hard-cut concat, narration
-    audio muxed over the result."""
-    durations = split_duration_evenly(audio_duration, len(image_paths))
+    """Build the final slideshow video. All Phase 3 parameters default to
+    Phase 1/2 behavior: hard cut, no overlays, no captions, no music — a
+    caller that passes none of them gets the exact prior pipeline."""
+    base_durations = split_duration_evenly(audio_duration, len(image_paths))
+    use_crossfade = transition == "crossfade" and len(image_paths) > 1
+    durations = crossfade_segment_durations(base_durations, _TRANSITION_DURATION) if use_crossfade else base_durations
 
     event_queue.put(ProgressEvent(
         stage="Slideshow Assembly", message=f"Building {len(image_paths)} segments…",
@@ -70,10 +94,34 @@ def assemble_slideshow(
         )
 
     concat_path = str(scene_dir / "slideshow_concat.mp4")
-    ffmpeg.concat_segments_video_only(segment_paths, concat_path)
+    if use_crossfade:
+        ffmpeg.concat_segments_with_xfade(segment_paths, durations, _TRANSITION_DURATION, concat_path)
+    else:
+        ffmpeg.concat_segments_video_only(segment_paths, concat_path)
+    video_path = concat_path
+
+    if vignette or grain:
+        overlay_path = str(scene_dir / "slideshow_overlay.mp4")
+        ffmpeg.apply_overlays(video_path, overlay_path, vignette, grain)
+        video_path = overlay_path
+
+    if captions:
+        from docu_studio.slideshow.slideshow_captions import estimate_word_timestamps, write_ass_file
+
+        timings = estimate_word_timestamps(script_text, audio_duration)
+        ass_path = str(scene_dir / "captions.ass")
+        write_ass_file(timings, ass_path, out_width, out_height, audio_duration)
+        captioned_path = str(scene_dir / "slideshow_captioned.mp4")
+        ffmpeg.burn_captions(video_path, ass_path, captioned_path)
+        video_path = captioned_path
 
     event_queue.put(ProgressEvent(stage="Slideshow Mux", message="Muxing final slideshow…"))
-    ffmpeg.mux_audio_video(concat_path, audio_path, str(output_path))
+    narration_path = audio_path
+    if music_path:
+        mixed_audio_path = str(scene_dir / "narration_with_music.mp3")
+        ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio_path)
+        narration_path = mixed_audio_path
+    ffmpeg.mux_audio_video(video_path, narration_path, str(output_path))
 
     event_queue.put(LogEvent(
         message=f"Slideshow assembled: {len(image_paths)} segments → {output_path}",
