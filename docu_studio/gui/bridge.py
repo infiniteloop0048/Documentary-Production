@@ -358,6 +358,7 @@ class Bridge:
                 if getattr(s, "output_folder", None)
                 else Path.home() / "DocuStudio"
             )
+            jamendo_client_id = key_cache.get("docu_studio_jamendo") or ""
 
             self._runner = SlideshowRunner(
                 script_text=config.get("script_text", ""),
@@ -365,6 +366,14 @@ class Bridge:
                 tts=tts,
                 output_base=output_base,
                 aspect_ratio=config.get("aspect_ratio", "9:16"),
+                transition=config.get("transition", "cut"),
+                vignette=bool(config.get("vignette", False)),
+                grain=bool(config.get("grain", False)),
+                captions=bool(config.get("captions", False)),
+                music_enabled=bool(config.get("music_enabled", False)),
+                music_provider=config.get("music_provider", "jamendo"),
+                music_folder=config.get("music_folder", ""),
+                jamendo_client_id=jamendo_client_id,
             )
 
             def _run() -> None:
