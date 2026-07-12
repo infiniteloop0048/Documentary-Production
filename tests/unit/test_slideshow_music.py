@@ -1,4 +1,10 @@
-"""Unit tests for slideshow_music — requests/filesystem mocked, no network."""
+"""Unit tests for slideshow_music: LocalFolderMusicProvider and the jamendo
+-> local folder -> none fallback chain in resolve_music_track(). Requests/
+filesystem mocked, no network.
+
+Jamendo search/fetch/cache-naming coverage lives in
+test_common_music_jamendo.py (JamendoMusicProvider is now shared, imported
+from docu_studio.common.music_jamendo)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,21 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from docu_studio.common.music_jamendo import TrackCandidate
 from docu_studio.slideshow.slideshow_music import (
-    JamendoMusicProvider,
     LocalFolderMusicProvider,
-    TrackCandidate,
     resolve_music_track,
-    safe_cache_filename,
 )
-
-
-class TestSafeCacheFilename:
-    def test_slugifies_title(self) -> None:
-        assert safe_cache_filename("Cinematic Piano #1!") == "cinematic_piano_1.mp3"
-
-    def test_empty_title_falls_back_to_track(self) -> None:
-        assert safe_cache_filename("") == "track.mp3"
 
 
 class TestLocalFolderMusicProvider:
@@ -47,13 +43,14 @@ class TestLocalFolderMusicProvider:
 
     def test_fetch_returns_local_path(self, tmp_path: Path) -> None:
         candidate = TrackCandidate(
-            title="song.mp3", duration=10.0, download_url="", local_path=str(tmp_path / "song.mp3"),
+            title="song.mp3", duration=10.0, download_url="", source="local_folder",
+            local_path=str(tmp_path / "song.mp3"),
         )
         provider = LocalFolderMusicProvider(str(tmp_path))
         assert provider.fetch(candidate) == str(tmp_path / "song.mp3")
 
     def test_fetch_without_local_path_raises(self) -> None:
-        candidate = TrackCandidate(title="x", duration=10.0, download_url="")
+        candidate = TrackCandidate(title="x", duration=10.0, download_url="", source="local_folder")
         provider = LocalFolderMusicProvider("/anywhere")
         with pytest.raises(ValueError, match="local_path"):
             provider.fetch(candidate)
@@ -62,56 +59,6 @@ class TestLocalFolderMusicProvider:
         provider = LocalFolderMusicProvider(str(tmp_path))
         with patch.object(Path, "iterdir", side_effect=OSError("permission denied")):
             assert provider.search("cinematic", 10.0) == []
-
-
-class TestJamendoMusicProvider:
-    def test_search_without_client_id_returns_empty(self) -> None:
-        provider = JamendoMusicProvider(client_id="")
-        assert provider.search("cinematic", 10.0) == []
-
-    def test_search_skips_results_without_download_url(self) -> None:
-        provider = JamendoMusicProvider(client_id="fake-id")
-        with patch("docu_studio.slideshow.slideshow_music.requests.get") as mock_get:
-            mock_get.return_value = MagicMock(
-                status_code=200,
-                json=lambda: {"results": [
-                    {"name": "No Download", "duration": 120, "audiodownload": ""},
-                    {"name": "Has Download", "duration": 90, "audiodownload": "https://example.com/t.mp3"},
-                ]},
-            )
-            candidates = provider.search("cinematic", 10.0)
-        assert len(candidates) == 1
-        assert candidates[0].title == "Has Download"
-
-    def test_search_request_failure_returns_empty(self) -> None:
-        provider = JamendoMusicProvider(client_id="fake-id")
-        with patch("docu_studio.slideshow.slideshow_music.requests.get", side_effect=Exception("boom")):
-            assert provider.search("cinematic", 10.0) == []
-
-    def test_fetch_caches_by_slug(self, tmp_path: Path) -> None:
-        provider = JamendoMusicProvider(client_id="fake-id")
-        candidate = TrackCandidate(
-            title="Cinematic Piano", duration=90, download_url="https://example.com/t.mp3", source="jamendo",
-        )
-        with patch("docu_studio.slideshow.slideshow_music.music_cache_dir", return_value=tmp_path):
-            with patch("docu_studio.slideshow.slideshow_music.requests.get") as mock_get:
-                mock_get.return_value = MagicMock(status_code=200, content=b"audio-bytes")
-                path = provider.fetch(candidate)
-        assert path == str(tmp_path / "cinematic_piano.mp3")
-        assert Path(path).read_bytes() == b"audio-bytes"
-
-    def test_fetch_cache_hit_skips_download(self, tmp_path: Path) -> None:
-        provider = JamendoMusicProvider(client_id="fake-id")
-        cached = tmp_path / "cinematic_piano.mp3"
-        cached.write_bytes(b"already-here")
-        candidate = TrackCandidate(
-            title="Cinematic Piano", duration=90, download_url="https://example.com/t.mp3", source="jamendo",
-        )
-        with patch("docu_studio.slideshow.slideshow_music.music_cache_dir", return_value=tmp_path):
-            with patch("docu_studio.slideshow.slideshow_music.requests.get") as mock_get:
-                path = provider.fetch(candidate)
-        mock_get.assert_not_called()
-        assert path == str(cached)
 
 
 class TestResolveMusicTrack:
