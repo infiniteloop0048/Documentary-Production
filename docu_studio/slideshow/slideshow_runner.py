@@ -24,6 +24,7 @@ from docu_studio.slideshow.slideshow_assembly import assemble_slideshow
 from docu_studio.slideshow.slideshow_config import SlideshowConfig
 from docu_studio.slideshow.slideshow_ffmpeg import SlideshowFFmpeg
 from docu_studio.slideshow.slideshow_images import validate_manual_images
+from docu_studio.slideshow.slideshow_music import DEFAULT_MUSIC_MOOD, resolve_music_track
 
 
 class SlideshowRunStatus(str, Enum):
@@ -40,10 +41,21 @@ class SlideshowRunner(threading.Thread):
         tts: TTSProvider,
         output_base: Path,
         aspect_ratio: str = "9:16",
+        transition: str = "cut",
+        vignette: bool = False,
+        grain: bool = False,
+        captions: bool = False,
+        music_enabled: bool = False,
+        music_provider: str = "jamendo",
+        music_folder: str = "",
+        jamendo_client_id: str = "",
     ) -> None:
         super().__init__(daemon=True, name="SlideshowRunner")
         self.config = SlideshowConfig(
             script_text=script_text, image_paths=image_paths, aspect_ratio=aspect_ratio,
+            transition=transition, vignette=vignette, grain=grain, captions=captions,
+            music_enabled=music_enabled, music_provider=music_provider,
+            music_folder=music_folder, jamendo_client_id=jamendo_client_id,
         )
         self.tts = tts
         self.output_base = output_base
@@ -86,6 +98,28 @@ class SlideshowRunner(threading.Thread):
         if self._cancelled():
             return
 
+        music_path = None
+        if self.config.music_enabled:
+            resolved = resolve_music_track(
+                provider_name=self.config.music_provider,
+                mood=DEFAULT_MUSIC_MOOD,
+                max_duration=audio_duration,
+                jamendo_client_id=self.config.jamendo_client_id,
+                local_folder=self.config.music_folder,
+            )
+            if resolved:
+                music_path, music_label = resolved
+                self.event_queue.put(LogEvent(
+                    message=f"Music: using {music_label!r}", level=LogLevel.INFO,
+                ))
+            else:
+                self.event_queue.put(LogEvent(
+                    message="Music: no usable track found — continuing without music bed",
+                    level=LogLevel.INFO,
+                ))
+        if self._cancelled():
+            return
+
         out_width, out_height = self.config.output_dimensions
         output_path = self._project_folder / "slideshow_final.mp4"
         assemble_slideshow(
@@ -98,6 +132,12 @@ class SlideshowRunner(threading.Thread):
             out_width=out_width,
             out_height=out_height,
             event_queue=self.event_queue,
+            transition=self.config.transition,
+            vignette=self.config.vignette,
+            grain=self.config.grain,
+            captions=self.config.captions,
+            script_text=self.config.script_text,
+            music_path=music_path,
         )
         if self._cancelled():
             return
