@@ -1,14 +1,17 @@
-"""Resilient footage-clip downloads for the shorts pipeline.
+"""Shared resilient-HTTP-download primitives for footage/photo fetching.
 
 Real runs observed intermittent ConnectionResetError(104, 'Connection reset
-by peer') and RemoteDisconnected failures against videos.pexels.com and
-cdn.pixabay.com, especially when several downloads fire in quick succession.
-Direct reproduction confirmed the resets are real and not tied to a single
-cause (occurred with and without a shared session, with library and browser
-User-Agents, both mid-burst and as a lone first request) — so this applies
-the standard resilience pattern rather than a narrow workaround.
+by peer') and RemoteDisconnected failures against videos.pexels.com,
+cdn.pixabay.com, and images.pexels.com, especially when several downloads
+fire in quick succession. Direct reproduction confirmed the resets are real
+and not tied to a single cause (occurred with and without a shared session,
+with library and browser User-Agents, both mid-burst and as a lone first
+request) — so this applies the standard resilience pattern (session reuse,
+retry with backoff+jitter on transient failures only, same-host pacing)
+rather than a narrow workaround. Used by both the Shorts and Slideshow
+pipelines' footage/photo download call sites.
 
-This is a shorts-only concern: the documentary pipeline's own
+This is a Shorts/Slideshow-only concern: the documentary pipeline's own
 `pipeline.stages.footage_assembly.download_clip` is untouched.
 """
 from __future__ import annotations
@@ -49,7 +52,7 @@ def _is_retriable(exc: Exception) -> bool:
     return isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout))
 
 
-def download_clip_resilient(
+def download_resilient(
     session: requests.Session,
     url: str,
     dest: str,

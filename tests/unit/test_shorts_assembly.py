@@ -433,7 +433,7 @@ class TestCollectClipsPerSentence:
         event_queue: queue.Queue = queue.Queue()
 
         with patch(
-            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            "docu_studio.shorts.shorts_assembly.download_resilient",
             side_effect=lambda session, url, dest, last_request_at=None: Path(dest).write_bytes(b"x"),
         ):
             pools, _fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
@@ -455,7 +455,7 @@ class TestCollectClipsPerSentence:
         download_calls: list[str] = []
 
         with patch(
-            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            "docu_studio.shorts.shorts_assembly.download_resilient",
             side_effect=lambda session, url, dest, last_request_at=None: (
                 download_calls.append(url), Path(dest).write_bytes(b"x"),
             ),
@@ -479,7 +479,7 @@ class TestCollectClipsPerSentence:
         event_queue: queue.Queue = queue.Queue()
 
         with patch(
-            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            "docu_studio.shorts.shorts_assembly.download_resilient",
             side_effect=lambda session, url, dest, last_request_at=None: Path(dest).write_bytes(b"x"),
         ):
             pools, _fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
@@ -499,7 +499,7 @@ class TestCollectClipsPerSentence:
         event_queue: queue.Queue = queue.Queue()
 
         with patch(
-            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            "docu_studio.shorts.shorts_assembly.download_resilient",
             side_effect=lambda session, url, dest, last_request_at=None: Path(dest).write_bytes(b"x"),
         ):
             _pools, fallback = _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)
@@ -524,7 +524,7 @@ class TestCollectClipsPerSentence:
             Path(dest).write_bytes(b"x")
 
         with patch(
-            "docu_studio.shorts.shorts_assembly.download_clip_resilient",
+            "docu_studio.shorts.shorts_assembly.download_resilient",
             side_effect=fake_download,
         ):
             _collect_clips_per_sentence(script, [provider], tmp_path, event_queue)

@@ -1,19 +1,30 @@
-"""Unit tests for the shorts-only resilient footage downloader: retry with
+"""Unit tests for the shared resilient-HTTP-download primitives: retry with
 backoff on transient failures, no retry on client errors, session/header/
 timeout consistency, and same-host pacing. No real network calls — session
-is always a MagicMock."""
+is always a MagicMock.
+
+Union of the former test_shorts_footage_download.py (the more complete of
+the two, including caplog assertions on the retry log messages) and
+test_slideshow_photo_download.py's primitive-coverage classes (deduped
+where both asserted the same behavior with only a different function/module
+name — `download_clip_resilient`/`download_photo_resilient` are now the
+single `download_resilient` in docu_studio/common/resilient_download.py).
+test_slideshow_photo_download.py keeps its `fetch_topic_images`-specific
+`TestFetchTopicImages` class, which is feature-specific orchestration and
+stays in slideshow/.
+"""
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from docu_studio.shorts.shorts_footage_download import (
+from docu_studio.common.resilient_download import (
     BROWSER_USER_AGENT,
     build_download_session,
-    download_clip_resilient,
+    download_resilient,
 )
 
 
@@ -50,9 +61,9 @@ class TestRetryOnTransientFailures:
         ]
         dest = str(tmp_path / "clip.mp4")
 
-        with patch("docu_studio.shorts.shorts_footage_download.time.sleep") as mock_sleep:
+        with patch("docu_studio.common.resilient_download.time.sleep") as mock_sleep:
             with caplog.at_level("INFO"):
-                result = download_clip_resilient(session, "https://videos.pexels.com/a.mp4", dest)
+                result = download_resilient(session, "https://videos.pexels.com/a.mp4", dest)
 
         assert result == dest
         assert Path(dest).read_bytes() == b"real-clip-data"
@@ -67,8 +78,8 @@ class TestRetryOnTransientFailures:
             session.get.side_effect = [_http_error_response(status), _ok_response()]
             dest = str(tmp_path / f"clip_{status}.mp4")
 
-            with patch("docu_studio.shorts.shorts_footage_download.time.sleep"):
-                result = download_clip_resilient(session, "https://cdn.pixabay.com/a.mp4", dest)
+            with patch("docu_studio.common.resilient_download.time.sleep"):
+                result = download_resilient(session, "https://cdn.pixabay.com/a.mp4", dest)
 
             assert result == dest
             assert session.get.call_count == 2
@@ -80,10 +91,10 @@ class TestRetryOnTransientFailures:
         session.get.side_effect = requests.exceptions.ConnectionError("reset")
         dest = str(tmp_path / "clip.mp4")
 
-        with patch("docu_studio.shorts.shorts_footage_download.time.sleep"):
+        with patch("docu_studio.common.resilient_download.time.sleep"):
             with caplog.at_level("INFO"):
                 with pytest.raises(requests.exceptions.ConnectionError):
-                    download_clip_resilient(session, "https://videos.pexels.com/a.mp4", dest)
+                    download_resilient(session, "https://videos.pexels.com/a.mp4", dest)
 
         assert session.get.call_count == 3
         messages = [r.message for r in caplog.records]
@@ -98,9 +109,9 @@ class TestNoRetryOnClientErrors:
         session.get.return_value = _http_error_response(404)
         dest = str(tmp_path / "clip.mp4")
 
-        with patch("docu_studio.shorts.shorts_footage_download.time.sleep") as mock_sleep:
+        with patch("docu_studio.common.resilient_download.time.sleep") as mock_sleep:
             with pytest.raises(requests.exceptions.HTTPError):
-                download_clip_resilient(session, "https://videos.pexels.com/a.mp4", dest)
+                download_resilient(session, "https://videos.pexels.com/a.mp4", dest)
 
         assert session.get.call_count == 1
         mock_sleep.assert_not_called()
@@ -116,7 +127,7 @@ class TestSessionAndHeaders:
         session.get.return_value = _ok_response()
         dest = str(tmp_path / "clip.mp4")
 
-        download_clip_resilient(session, "https://videos.pexels.com/a.mp4", dest)
+        download_resilient(session, "https://videos.pexels.com/a.mp4", dest)
 
         _args, kwargs = session.get.call_args
         assert kwargs["stream"] is True
@@ -130,9 +141,9 @@ class TestSameHostPacing:
         dest = str(tmp_path / "clip.mp4")
         last_request_at = {"videos.pexels.com": 1000.0}
 
-        with patch("docu_studio.shorts.shorts_footage_download.time.monotonic", return_value=1000.05):
-            with patch("docu_studio.shorts.shorts_footage_download.time.sleep") as mock_sleep:
-                download_clip_resilient(session, "https://videos.pexels.com/a.mp4", dest, last_request_at)
+        with patch("docu_studio.common.resilient_download.time.monotonic", return_value=1000.05):
+            with patch("docu_studio.common.resilient_download.time.sleep") as mock_sleep:
+                download_resilient(session, "https://videos.pexels.com/a.mp4", dest, last_request_at)
 
         mock_sleep.assert_called_once()
         (delay,), _ = mock_sleep.call_args
@@ -144,9 +155,9 @@ class TestSameHostPacing:
         dest = str(tmp_path / "clip.mp4")
         last_request_at = {"videos.pexels.com": 1000.0}
 
-        with patch("docu_studio.shorts.shorts_footage_download.time.monotonic", return_value=1000.05):
-            with patch("docu_studio.shorts.shorts_footage_download.time.sleep") as mock_sleep:
-                download_clip_resilient(session, "https://cdn.pixabay.com/a.mp4", dest, last_request_at)
+        with patch("docu_studio.common.resilient_download.time.monotonic", return_value=1000.05):
+            with patch("docu_studio.common.resilient_download.time.sleep") as mock_sleep:
+                download_resilient(session, "https://cdn.pixabay.com/a.mp4", dest, last_request_at)
 
         mock_sleep.assert_not_called()
 
@@ -156,6 +167,6 @@ class TestSameHostPacing:
         dest = str(tmp_path / "clip.mp4")
         last_request_at: dict[str, float] = {}
 
-        download_clip_resilient(session, "https://videos.pexels.com/a.mp4", dest, last_request_at)
+        download_resilient(session, "https://videos.pexels.com/a.mp4", dest, last_request_at)
 
         assert "videos.pexels.com" in last_request_at
