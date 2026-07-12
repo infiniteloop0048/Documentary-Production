@@ -150,7 +150,13 @@ the total duration `estimate_word_timestamps` distributes across.
 - `TrackCandidate` — own dataclass (title, duration, download_url, source, local_path).
 - `LocalFolderMusicProvider(folder_path)` — picks a random audio file from a
   user-browsed folder (new GUI "Browse folder…" button, same pattern as
-  `browseSlideshowImages()`).
+  `browseSlideshowImages()`). `search()` returns `[]` (never raises) when the
+  folder doesn't exist, is empty, or contains no files with a recognized audio
+  extension (`.mp3`/`.wav`/`.m4a`/`.ogg`) — this flows through
+  `resolve_music_track()`'s existing "no candidates -> log and return None"
+  branch exactly like Jamendo returning zero results does, so an empty or
+  invalid folder skips the music bed gracefully rather than crashing the run,
+  whether local-folder is the primary provider or the Jamendo fallback.
 - `JamendoMusicProvider(client_id)` — self-contained reimplementation of
   `shorts/music_providers.py`'s search+cache+fetch technique against
   `api.jamendo.com/v3.0/tracks`, own cache dir (`slideshow_music_cache`, kept
