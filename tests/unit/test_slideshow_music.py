@@ -58,6 +58,11 @@ class TestLocalFolderMusicProvider:
         with pytest.raises(ValueError, match="local_path"):
             provider.fetch(candidate)
 
+    def test_search_handles_oserror_during_iteration(self, tmp_path: Path) -> None:
+        provider = LocalFolderMusicProvider(str(tmp_path))
+        with patch.object(Path, "iterdir", side_effect=OSError("permission denied")):
+            assert provider.search("cinematic", 10.0) == []
+
 
 class TestJamendoMusicProvider:
     def test_search_without_client_id_returns_empty(self) -> None:

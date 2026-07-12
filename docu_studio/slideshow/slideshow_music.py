@@ -68,12 +68,18 @@ class LocalFolderMusicProvider:
 
     def search(self, query: str, max_duration: float) -> list[TrackCandidate]:
         folder = Path(self._folder_path) if self._folder_path else None
-        if folder is None or not folder.is_dir():
+        if folder is None:
             return []
-        files = sorted(
-            p for p in folder.iterdir()
-            if p.is_file() and p.suffix.lower() in _AUDIO_EXTENSIONS
-        )
+        try:
+            if not folder.is_dir():
+                return []
+            files = sorted(
+                p for p in folder.iterdir()
+                if p.is_file() and p.suffix.lower() in _AUDIO_EXTENSIONS
+            )
+        except OSError as exc:
+            _log.warning("LocalFolderMusicProvider: search failed (%s) — returning empty list", exc)
+            return []
         if not files:
             return []
         chosen = random.Random(self._seed).choice(files)
