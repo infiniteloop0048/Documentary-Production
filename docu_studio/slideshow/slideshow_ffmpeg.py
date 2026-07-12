@@ -227,3 +227,27 @@ class SlideshowFFmpeg(FFmpegWrapper):
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=ass_dir)
         self._check(result, f"burn_captions → {output_path!r}")
+
+    def mix_music_bed(
+        self, voice_path: str, music_path: str, video_duration: float, output_path: str,
+    ) -> None:
+        """Loop/trim *music_path* to *video_duration*, duck it under
+        *voice_path* via sidechaincompress, and write the mixed result to
+        *output_path* as a standalone audio file — the caller
+        (slideshow_assembly) passes this into mux_audio_video exactly as it
+        would the raw narration track, so that method's -map discipline
+        never needs to change."""
+        from docu_studio.slideshow.slideshow_audio_mix import build_ducking_filtergraph
+
+        filter_complex = build_ducking_filtergraph(video_duration)
+        cmd = [
+            self._ffmpeg, "-y",
+            "-i", voice_path,
+            "-stream_loop", "-1", "-i", music_path,
+            "-filter_complex", filter_complex,
+            "-map", "[aout]",
+            "-c:a", "aac",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        self._check(result, f"mix_music_bed → {output_path!r}")

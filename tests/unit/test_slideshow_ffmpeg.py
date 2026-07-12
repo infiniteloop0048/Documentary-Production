@@ -204,3 +204,33 @@ class TestBurnCaptions:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="subtitles boom")
             with pytest.raises(FFmpegError, match="subtitles boom"):
                 wrapper.burn_captions(str(tmp_path / "in.mp4"), str(ass_path), str(tmp_path / "out.mp4"))
+
+
+class TestMixMusicBed:
+    def test_maps_aout_and_loops_music_input(self, wrapper: SlideshowFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.mix_music_bed("/voice.mp3", "/music.mp3", 12.0, "/out.mp3")
+        cmd = mock_run.call_args[0][0]
+        assert cmd[cmd.index("-map") + 1] == "[aout]"
+        assert "-stream_loop" in cmd
+        assert cmd[cmd.index("-stream_loop") + 1] == "-1"
+        # -stream_loop -1 must immediately precede the music input, not the voice input.
+        music_i_index = cmd.index("-i", cmd.index("-stream_loop"))
+        assert cmd[music_i_index + 1] == "/music.mp3"
+
+    def test_filter_complex_uses_build_ducking_filtergraph(self, wrapper: SlideshowFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.mix_music_bed("/voice.mp3", "/music.mp3", 12.0, "/out.mp3")
+        cmd = mock_run.call_args[0][0]
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        assert "atrim=0:12.000" in filter_complex
+        assert "sidechaincompress" in filter_complex
+
+    def test_raises_ffmpeg_error_on_nonzero_exit(self, wrapper: SlideshowFFmpeg) -> None:
+        from docu_studio.media.ffmpeg_wrapper import FFmpegError
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="mix boom")
+            with pytest.raises(FFmpegError, match="mix boom"):
+                wrapper.mix_music_bed("/voice.mp3", "/music.mp3", 12.0, "/out.mp3")
