@@ -196,28 +196,6 @@ class TestBurnCaptions:
         assert args[-1].endswith("out.mp4")
 
 
-class TestFinalizeFilter:
-    def test_appends_setsar_and_format_suffix(self, wrapper: ShortsFFmpeg) -> None:
-        result = wrapper._finalize_filter("scale=100:100")
-        assert result == "scale=100:100,setsar=1,format=yuv420p"
-
-    def test_ends_with_setsar_1_regardless_of_upstream_filters(self, wrapper: ShortsFFmpeg) -> None:
-        # Real-run regression: chained scale/crop/zoompan filters occasionally
-        # round the encoded SAR to a near-1:1-but-not-exact value (e.g.
-        # 17485:17484), which ffmpeg's concat filter rejects outright when
-        # joining against segments that ARE exactly 1:1. Every per-segment
-        # filter chain must end with setsar=1 no matter what preceded it.
-        chains = [
-            "setpts=PTS/1.35",
-            "scale=4320:-2:flags=lanczos,zoompan=z='1.0':x='0':y='0':d=90:s=1080x1920:fps=30",
-            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920",
-            "subtitles=captions.ass",
-        ]
-        for chain in chains:
-            result = wrapper._finalize_filter(chain)
-            assert result.endswith(",setsar=1,format=yuv420p")
-
-
 class TestApplyKenBurns:
     def test_upscales_before_zoompan_with_lanczos(self, wrapper: ShortsFFmpeg) -> None:
         # Real-run regression: zoompan crops on integer pixel coordinates at input
@@ -270,7 +248,7 @@ class TestApplyKenBurns:
     def test_filter_chain_ends_with_setsar_and_format(self, wrapper: ShortsFFmpeg) -> None:
         # Ken Burns' 4x lanczos upscale + zoompan is the step that produced
         # the drifted SAR (e.g. 17485:17484) in production — see the module
-        # docstring on _finalize_filter.
+        # docstring on docu_studio.common.ffmpeg_finalize.finalize_filter.
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             wrapper.apply_ken_burns("/in.mp4", "/out.mp4", 3.0, "in", False)
@@ -421,7 +399,7 @@ class TestConcatSegmentsVideoOnly:
         self, wrapper: ShortsFFmpeg, caplog
     ) -> None:
         # Tripwire for any future segment-producing path added without going
-        # through _finalize_filter — this must never abort the run, only log.
+        # through finalize_filter — this must never abort the run, only log.
         sar_values = iter(["1:1", "17485:17484", "1:1"])
 
         def fake_run(cmd, **kwargs):

@@ -18,11 +18,6 @@ def wrapper() -> SlideshowFFmpeg:
             return SlideshowFFmpeg()
 
 
-class TestFinalizeFilter:
-    def test_appends_sar_pixfmt_suffix(self, wrapper: SlideshowFFmpeg) -> None:
-        assert wrapper._finalize_filter("scale=100:100") == "scale=100:100,setsar=1,format=yuv420p"
-
-
 class TestApplyKenBurnsImage:
     def test_loops_the_still_image_input(self, wrapper: SlideshowFFmpeg) -> None:
         # A still image is a single-frame source; without -loop 1 ffmpeg

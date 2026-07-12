@@ -18,21 +18,12 @@ from __future__ import annotations
 import os
 import subprocess
 
+from docu_studio.common.ffmpeg_finalize import finalize_filter
 from docu_studio.media.ffmpeg_wrapper import FFmpegWrapper
-
-# Same rationale as shorts_ffmpeg.py's _SAR_PIXFMT_SUFFIX: chained scale
-# operations can round the encoded SAR to a near-1:1-but-not-exact value,
-# and ffmpeg's concat filter rejects segments whose SAR doesn't match
-# exactly. Every per-segment filter chain must end with this suffix.
-_SAR_PIXFMT_SUFFIX = "setsar=1,format=yuv420p"
 
 
 class SlideshowFFmpeg(FFmpegWrapper):
     """FFmpeg operations used only by the Slideshow assembly path."""
-
-    @staticmethod
-    def _finalize_filter(filter_chain: str) -> str:
-        return f"{filter_chain},{_SAR_PIXFMT_SUFFIX}"
 
     @staticmethod
     def _xfade_offsets(durations: list[float], transition_duration: float) -> list[float]:
@@ -78,7 +69,7 @@ class SlideshowFFmpeg(FFmpegWrapper):
                 f"duration={transition_duration:.2f}:offset={offsets[i - 1]:.3f}"
             )
             if is_last:
-                stage += f",{_SAR_PIXFMT_SUFFIX}"
+                stage = finalize_filter(stage)
             stage += out_label
             stages.append(stage)
             prev_label = f"[x{i}]"
@@ -121,7 +112,7 @@ class SlideshowFFmpeg(FFmpegWrapper):
         x_expr = "iw/2-(iw/zoom/2)"
         y_expr = "ih/2-(ih/zoom/2)"
         upscale_dim = out_width * 4
-        vf = self._finalize_filter(
+        vf = finalize_filter(
             f"scale={out_width}:{out_height}:force_original_aspect_ratio=increase,"
             f"crop={out_width}:{out_height},"
             f"scale={upscale_dim}:-2:flags=lanczos,"
@@ -181,7 +172,7 @@ class SlideshowFFmpeg(FFmpegWrapper):
         if grain:
             # alls=8 is a subtle grain amount, not ffmpeg's heavier default.
             filters.append("noise=alls=8:allf=t")
-        vf = self._finalize_filter(",".join(filters))
+        vf = finalize_filter(",".join(filters))
         cmd = [
             self._ffmpeg, "-y",
             "-i", input_path,
@@ -206,7 +197,7 @@ class SlideshowFFmpeg(FFmpegWrapper):
         directory and reference only its bare filename in the filter string.
         input_path/output_path are unaffected — they're plain argv values.
 
-        Also runs through _finalize_filter like every other new re-encoding
+        Also runs through finalize_filter like every other new re-encoding
         path in this phase: the subtitles filter itself can't introduce SAR
         drift (it draws an overlay, it doesn't scale), so this is stricter
         than strictly required, but it keeps the SAR/pixfmt discipline
@@ -215,7 +206,7 @@ class SlideshowFFmpeg(FFmpegWrapper):
         """
         ass_dir = os.path.dirname(ass_path) or "."
         ass_name = os.path.basename(ass_path)
-        vf = self._finalize_filter(f"subtitles={ass_name}")
+        vf = finalize_filter(f"subtitles={ass_name}")
         cmd = [
             self._ffmpeg, "-y",
             "-i", os.path.abspath(input_path),
