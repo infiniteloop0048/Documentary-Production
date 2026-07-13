@@ -204,6 +204,7 @@ let _runMode = 'guided';
 
 function startConfig(mode) {
   _runMode = mode;
+  _q('start-run-btn').disabled = false;
   const badge = _q('config-mode-badge');
   if (mode === 'guided') {
     badge.textContent = 'Guided Mode';
@@ -263,6 +264,10 @@ async function browseClipStoryClips() {
       trimIn: 0, trimOut: c.duration, scriptText: '', useLlm: false,
     });
   });
+  if (Object.keys(_clipStoryReview).length > 0) {
+    _clipStoryReview = {};
+    _renderClipStoryReview();
+  }
   _renderClipStoryClips();
 }
 
@@ -352,11 +357,19 @@ function _moveClipStoryClip(i, delta) {
   const j = i + delta;
   if (j < 0 || j >= _clipStoryClips.length) return;
   [_clipStoryClips[i], _clipStoryClips[j]] = [_clipStoryClips[j], _clipStoryClips[i]];
+  if (Object.keys(_clipStoryReview).length > 0) {
+    _clipStoryReview = {};
+    _renderClipStoryReview();
+  }
   _renderClipStoryClips();
 }
 
 function _removeClipStoryClip(i) {
   _clipStoryClips.splice(i, 1);
+  if (Object.keys(_clipStoryReview).length > 0) {
+    _clipStoryReview = {};
+    _renderClipStoryReview();
+  }
   _renderClipStoryClips();
 }
 
@@ -758,6 +771,9 @@ function _handleEvent(ev) {
     const btn = _q('open-folder-btn');
     btn.style.display = '';
     btn.onclick = () => window.pywebview.api.open_output_folder(ev.output_path);
+    // Note: no 'slideshow' arm here — pre-existing gap, not introduced by this
+    // feature. Slideshow's "complete" stage-track cell has never lit up; left
+    // as-is to avoid an undisclosed behavior change to Slideshow.
     _setStage(_runMode === 'short' ? 6 : _runMode === 'clipstory' ? 0 : 7, 'complete');
     _q('cancel-btn').style.display = 'none';
     _q('back-btn').style.display = '';
