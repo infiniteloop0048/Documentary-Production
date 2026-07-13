@@ -4,7 +4,6 @@ existing event-translation code works unmodified for the new 'clipstory' mode.
 """
 from __future__ import annotations
 
-import logging
 import queue
 import tempfile
 import threading
@@ -18,8 +17,6 @@ from docu_studio.clipstory.clipstory_config import ClipStoryConfig
 from docu_studio.history.run_history import RunRecord, save_run
 from docu_studio.output.project_folder import create_project_folder
 from docu_studio.pipeline.events import ErrorEvent, ProgressEvent
-
-_log = logging.getLogger(__name__)
 
 
 class ClipStoryRunStatus(str, Enum):
