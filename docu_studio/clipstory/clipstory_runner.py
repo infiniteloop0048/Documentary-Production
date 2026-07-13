@@ -12,8 +12,13 @@ from enum import Enum
 from pathlib import Path
 
 from docu_studio.adapters.tts.base import TTSProvider
-from docu_studio.clipstory.clipstory_assembly import ClipStoryFitError, assemble_clip_story
+from docu_studio.clipstory.clipstory_assembly import (
+    ClipStoryFitError,
+    ClipStoryTransitionError,
+    assemble_clip_story,
+)
 from docu_studio.clipstory.clipstory_config import ClipStoryConfig
+from docu_studio.clipstory.clipstory_music import DEFAULT_MUSIC_MOOD, resolve_music_track
 from docu_studio.history.run_history import RunRecord, save_run
 from docu_studio.output.project_folder import create_project_folder
 from docu_studio.pipeline.events import ErrorEvent, ProgressEvent
@@ -41,7 +46,7 @@ class ClipStoryRunner(threading.Thread):
     def run(self) -> None:
         try:
             self._execute()
-        except ClipStoryFitError as exc:
+        except (ClipStoryFitError, ClipStoryTransitionError) as exc:
             self.event_queue.put(ErrorEvent(message=str(exc), fatal=True))
         except Exception as exc:
             self.event_queue.put(ErrorEvent(message=str(exc), fatal=True))
@@ -56,12 +61,35 @@ class ClipStoryRunner(threading.Thread):
             self.config.topic, self._started_at, self.output_base
         )
         self.event_queue.put(ProgressEvent(stage="ClipStory Assembly", message="Assembling clips…"))
+        music_path = None
+        if self.config.music_enabled:
+            total_estimate = sum(c.duration_estimate for c in self.config.clips)
+            resolved = resolve_music_track(
+                provider_name=self.config.music_provider,
+                mood=DEFAULT_MUSIC_MOOD,
+                max_duration=total_estimate,
+                jamendo_client_id=self.config.jamendo_client_id,
+                local_folder=self.config.music_folder,
+            )
+            if resolved:
+                music_path, music_label = resolved
+                self.event_queue.put(ProgressEvent(
+                    stage="ClipStory Assembly", message=f"Music: using {music_label!r}",
+                ))
+            else:
+                self.event_queue.put(ProgressEvent(
+                    stage="ClipStory Assembly",
+                    message="Music: no usable track found — continuing without music bed",
+                ))
+        if self._cancelled():
+            return
         with tempfile.TemporaryDirectory(prefix="docu_studio_clipstory_") as tmp:
             if self._cancelled():
                 return
             output_path = self._project_folder / "clipstory_final.mp4"
             assemble_clip_story(
-                self.config, self.tts, Path(tmp), output_path, cancel_event=self.cancel_event
+                self.config, self.tts, Path(tmp), output_path,
+                cancel_event=self.cancel_event, music_path=music_path,
             )
             if self._cancelled():
                 return

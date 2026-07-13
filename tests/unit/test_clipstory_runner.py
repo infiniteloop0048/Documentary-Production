@@ -67,3 +67,34 @@ class TestClipStoryRunnerCancellation:
             runner.run()
         assert runner._status == ClipStoryRunStatus.CANCELLED
         mock_assemble.assert_not_called()
+
+
+class TestClipStoryRunnerMusic:
+    def test_music_enabled_resolves_track_and_passes_music_path(self, tmp_path: Path) -> None:
+        config = _make_config()
+        config.music_enabled = True
+        with patch("docu_studio.clipstory.clipstory_runner.create_project_folder") as mock_create, \
+             patch("docu_studio.clipstory.clipstory_runner.assemble_clip_story") as mock_assemble, \
+             patch("docu_studio.clipstory.clipstory_runner.resolve_music_track") as mock_resolve, \
+             patch("docu_studio.clipstory.clipstory_runner.save_run"):
+            mock_create.return_value = tmp_path
+            mock_resolve.return_value = ("/music/track.mp3", "Some Track")
+            runner = ClipStoryRunner(config=config, tts=MagicMock(), output_base=tmp_path)
+            runner.run()
+        mock_resolve.assert_called_once()
+        mock_assemble.assert_called_once()
+        assert mock_assemble.call_args.kwargs["music_path"] == "/music/track.mp3"
+
+    def test_music_disabled_skips_resolution(self, tmp_path: Path) -> None:
+        config = _make_config()
+        config.music_enabled = False
+        with patch("docu_studio.clipstory.clipstory_runner.create_project_folder") as mock_create, \
+             patch("docu_studio.clipstory.clipstory_runner.assemble_clip_story") as mock_assemble, \
+             patch("docu_studio.clipstory.clipstory_runner.resolve_music_track") as mock_resolve, \
+             patch("docu_studio.clipstory.clipstory_runner.save_run"):
+            mock_create.return_value = tmp_path
+            runner = ClipStoryRunner(config=config, tts=MagicMock(), output_base=tmp_path)
+            runner.run()
+        mock_resolve.assert_not_called()
+        mock_assemble.assert_called_once()
+        assert mock_assemble.call_args.kwargs["music_path"] is None
