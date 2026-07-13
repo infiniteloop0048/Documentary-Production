@@ -217,7 +217,6 @@ class ClipStoryFFmpeg(FFmpegWrapper):
         hardcodes 1920x1080 for the always-16:9 Documentary pipeline."""
         if output_resolution not in _OUTPUT_RESOLUTIONS:
             raise ValueError(f"Unknown output_resolution: {output_resolution!r}")
-        w, h = _OUTPUT_RESOLUTIONS[output_resolution]
         n = len(input_paths)
         scale_parts = ";".join(f"[{i}:v]fps=30[v{i}]" for i in range(n))
         interleaved = "".join(f"[v{i}][{i}:a]" for i in range(n))
