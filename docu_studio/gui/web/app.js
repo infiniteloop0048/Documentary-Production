@@ -217,12 +217,16 @@ function startConfig(mode) {
     badge.textContent = 'Slideshow Mode';
     badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-emerald-900/40 text-emerald-300';
     _q('topic-row').style.display = 'none';
+  } else if (mode === 'clipstory') {
+    badge.textContent = 'Clip Story Mode';
+    badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-amber-900/40 text-amber-300';
+    _q('topic-row').style.display = 'none';
   } else {
     badge.textContent = 'Full Auto Mode';
     badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-purple-900/40 text-purple-300';
     _q('topic-row').style.display = 'none';
   }
-  _q('doc-duration-row').style.display = (mode === 'short' || mode === 'slideshow') ? 'none' : '';
+  _q('doc-duration-row').style.display = (mode === 'short' || mode === 'slideshow' || mode === 'clipstory') ? 'none' : '';
   _q('short-duration-row').style.display = mode === 'short' ? '' : 'none';
   _q('aspect-row').style.display = mode === 'short' ? '' : 'none';
   _q('captions-row').style.display = mode === 'short' ? '' : 'none';
@@ -237,8 +241,185 @@ function startConfig(mode) {
   _q('slideshow-grain-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-captions-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-music-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('clipstory-topic-row').style.display = mode === 'clipstory' ? '' : 'none';
+  _q('clipstory-canvas-row').style.display = mode === 'clipstory' ? '' : 'none';
+  _q('clipstory-clips-row').style.display = mode === 'clipstory' ? '' : 'none';
+  _q('clipstory-review-row').style.display = mode === 'clipstory' ? '' : 'none';
   onSlideshowMusicToggleChange();
   showScreen('config');
+}
+
+let _clipStoryClips = [];   // [{path, duration, posterPath, trimIn, trimOut, scriptText, useLlm}]
+let _clipStoryReview = {};  // {index: {text, pace_estimate_seconds}}
+
+async function browseClipStoryClips() {
+  const paths = await window.pywebview.api.browse_videos();
+  if (!paths || !paths.length) return;
+  const meta = await window.pywebview.api.get_clip_metadata(paths);
+  if (!meta.ok) { alert('Failed to read clip metadata: ' + meta.error); return; }
+  meta.clips.forEach(c => {
+    _clipStoryClips.push({
+      path: c.path, duration: c.duration, posterPath: c.poster_path,
+      trimIn: 0, trimOut: c.duration, scriptText: '', useLlm: false,
+    });
+  });
+  _renderClipStoryClips();
+}
+
+function _renderClipStoryClips() {
+  const list = _q('clipstory-clip-list');
+  list.innerHTML = '';
+  _clipStoryClips.forEach((clip, i) => {
+    const row = document.createElement('div');
+    row.className = 'bg-input border border-border rounded-lg px-3 py-3 text-sm text-white';
+
+    const topRow = document.createElement('div');
+    topRow.className = 'flex items-center gap-2';
+
+    const thumb = document.createElement('img');
+    thumb.src = _toFileUrl(clip.posterPath);
+    thumb.className = 'w-14 h-10 object-cover rounded shrink-0';
+    thumb.alt = '';
+    topRow.appendChild(thumb);
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'flex-1 truncate';
+    nameSpan.textContent = `${i + 1}. ${clip.path.split(/[\\/]/).pop()} (${clip.duration.toFixed(1)}s)`;
+    topRow.appendChild(nameSpan);
+
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.className = 'text-faint hover:text-white px-1';
+    upBtn.textContent = '↑';
+    upBtn.onclick = () => _moveClipStoryClip(i, -1);
+    topRow.appendChild(upBtn);
+
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button';
+    downBtn.className = 'text-faint hover:text-white px-1';
+    downBtn.textContent = '↓';
+    downBtn.onclick = () => _moveClipStoryClip(i, 1);
+    topRow.appendChild(downBtn);
+
+    const rmBtn = document.createElement('button');
+    rmBtn.type = 'button';
+    rmBtn.className = 'text-faint hover:text-red-400 px-1';
+    rmBtn.textContent = '✕';
+    rmBtn.onclick = () => _removeClipStoryClip(i);
+    topRow.appendChild(rmBtn);
+
+    row.appendChild(topRow);
+
+    const trimRow = document.createElement('div');
+    trimRow.className = 'mt-2 flex items-center gap-2 text-xs text-dim';
+    trimRow.innerHTML = `
+      <label>Trim in (s)</label>
+      <input type="number" min="0" step="0.1" value="${clip.trimIn}" data-idx="${i}" data-field="trimIn"
+        class="w-20 bg-panel border border-border rounded px-2 py-1 text-white">
+      <label>Trim out (s)</label>
+      <input type="number" min="0" step="0.1" value="${clip.trimOut}" data-idx="${i}" data-field="trimOut"
+        class="w-20 bg-panel border border-border rounded px-2 py-1 text-white">
+    `;
+    trimRow.querySelectorAll('input').forEach(input => {
+      input.onchange = (e) => _updateClipStoryTrim(i, e.target.dataset.field, parseFloat(e.target.value));
+    });
+    row.appendChild(trimRow);
+
+    const scriptRow = document.createElement('div');
+    scriptRow.className = 'mt-2';
+    const llmLabel = document.createElement('label');
+    llmLabel.className = 'flex items-center gap-2 text-xs text-dim';
+    llmLabel.innerHTML = `<input type="checkbox" ${clip.useLlm ? 'checked' : ''} class="accent-accent"> Generate with AI`;
+    llmLabel.querySelector('input').onchange = (e) => _updateClipStoryLlmFlag(i, e.target.checked);
+    scriptRow.appendChild(llmLabel);
+    if (!clip.useLlm) {
+      const textarea = document.createElement('textarea');
+      textarea.rows = 2;
+      textarea.placeholder = 'Write narration for this clip…';
+      textarea.value = clip.scriptText;
+      textarea.className = 'mt-1 w-full bg-panel border border-border rounded px-2 py-1 text-white text-xs';
+      textarea.onchange = (e) => _updateClipStoryScript(i, e.target.value);
+      scriptRow.appendChild(textarea);
+    }
+    row.appendChild(scriptRow);
+
+    list.appendChild(row);
+  });
+  _updateClipStoryGenerateButtonState();
+}
+
+function _moveClipStoryClip(i, delta) {
+  const j = i + delta;
+  if (j < 0 || j >= _clipStoryClips.length) return;
+  [_clipStoryClips[i], _clipStoryClips[j]] = [_clipStoryClips[j], _clipStoryClips[i]];
+  _renderClipStoryClips();
+}
+
+function _removeClipStoryClip(i) {
+  _clipStoryClips.splice(i, 1);
+  _renderClipStoryClips();
+}
+
+function _updateClipStoryTrim(i, field, value) {
+  if (Number.isNaN(value)) return;
+  _clipStoryClips[i][field] = value;
+}
+
+function _updateClipStoryScript(i, text) {
+  _clipStoryClips[i].scriptText = text;
+}
+
+function _updateClipStoryLlmFlag(i, checked) {
+  _clipStoryClips[i].useLlm = checked;
+  if (checked) _clipStoryClips[i].scriptText = '';
+  _renderClipStoryClips();
+}
+
+function _updateClipStoryGenerateButtonState() {
+  const btn = _q('clipstory-generate-btn');
+  if (!btn) return;
+  const enabled = _clipStoryClips.length > 0 && _clipStoryClips.every(
+    c => c.trimOut > c.trimIn && (c.useLlm || c.scriptText.trim().length > 0)
+  );
+  btn.disabled = !enabled;
+  btn.className = enabled
+    ? 'text-xs font-semibold px-3 py-1.5 rounded-lg bg-card border border-border text-dim hover:text-white hover:border-bstrong transition-colors cursor-pointer'
+    : 'text-xs font-semibold px-3 py-1.5 rounded-lg bg-card border border-border text-faint cursor-not-allowed transition-colors';
+}
+
+async function generateClipStoryNarration() {
+  const topic = (_q('clipstory-topic-input')?.value || '').trim();
+  const clips = _clipStoryClips.map(c => ({
+    path: c.path, trim_in: c.trimIn, trim_out: c.trimOut,
+    script_text: c.scriptText, use_llm_generation: c.useLlm,
+  }));
+  const res = await window.pywebview.api.generate_clipstory_narration(topic, clips);
+  if (!res.ok) { alert('Narration generation failed: ' + res.error); return; }
+  _clipStoryReview = res.review;
+  _renderClipStoryReview();
+}
+
+function _renderClipStoryReview() {
+  const list = _q('clipstory-review-list');
+  list.innerHTML = '';
+  Object.keys(_clipStoryReview).sort((a, b) => a - b).forEach(idx => {
+    const entry = _clipStoryReview[idx];
+    const clip = _clipStoryClips[idx];
+    const targetDuration = (clip.trimOut - clip.trimIn).toFixed(1);
+    const row = document.createElement('div');
+    row.className = 'bg-input border border-border rounded-lg px-3 py-3 text-sm text-white';
+    row.innerHTML = `
+      <div class="text-xs text-faint">Clip ${Number(idx) + 1} — target ${targetDuration}s, estimated pace ${entry.pace_estimate_seconds.toFixed(1)}s</div>
+      <textarea rows="3" data-idx="${idx}" class="mt-1 w-full bg-panel border border-border rounded px-2 py-1 text-white text-xs">${entry.text}</textarea>
+    `;
+    row.querySelector('textarea').onchange = (e) => {
+      _clipStoryReview[idx].text = e.target.value;
+      _clipStoryClips[idx].scriptText = e.target.value;
+    };
+    list.appendChild(row);
+  });
+  const startBtn = _q('start-run-btn');
+  if (_runMode === 'clipstory') startBtn.disabled = Object.keys(_clipStoryReview).length !== _clipStoryClips.length;
 }
 
 let _slideshowImages = [];
@@ -404,6 +585,26 @@ function updateShortsDurationHint() {
 
 async function startRun() {
   const topic = (_q('topic-input')?.value || '').trim();
+  if (_runMode === 'clipstory') {
+    const clipsTopic = (_q('clipstory-topic-input')?.value || '').trim();
+    if (Object.keys(_clipStoryReview).length !== _clipStoryClips.length) {
+      alert('Please generate/review narration for every clip first.');
+      return;
+    }
+    showScreen('progress');
+    _resetProgress();
+    startPolling();
+    const res = await window.pywebview.api.start_clipstory_run({
+      topic: clipsTopic,
+      output_resolution: _q('clipstory-canvas-select').value,
+      clips: _clipStoryClips.map((c, i) => ({
+        path: c.path, trim_in: c.trimIn, trim_out: c.trimOut,
+        script_text: _clipStoryReview[i].text, use_llm_generation: false,
+      })),
+    });
+    if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
+    return;
+  }
   if (_runMode === 'slideshow') {
     const scriptText = (_q('slideshow-script-input')?.value || '').trim();
     if (!scriptText) {
@@ -488,20 +689,22 @@ async function cancelRun() {
 const STAGES = ['Script','Scenes','Audio','Keywords','Footage','Sync','Timeline','Done'];
 const SHORT_STAGES = ['Script','TTS','Alignment','Footage','Assembly','Captions & Music','Mux'];
 const SLIDESHOW_STAGES = ['TTS','Assembly','Mux'];
+const CLIPSTORY_STAGES = ['Assembly'];
 
 function _resetProgress() {
   _q('progress-title').textContent = 'Generating…';
   _q('log-area').innerHTML = '';
   _q('open-folder-btn').style.display = 'none';
-  _q('stage-track').style.display = (_runMode === 'short' || _runMode === 'slideshow') ? 'none' : '';
+  _q('stage-track').style.display = (_runMode === 'short' || _runMode === 'slideshow' || _runMode === 'clipstory') ? 'none' : '';
   _q('shorts-stage-track').style.display = _runMode === 'short' ? '' : 'none';
   _q('slideshow-stage-track').style.display = _runMode === 'slideshow' ? '' : 'none';
-  const stages = _runMode === 'short' ? SHORT_STAGES : _runMode === 'slideshow' ? SLIDESHOW_STAGES : STAGES;
+  _q('clipstory-stage-track').style.display = _runMode === 'clipstory' ? '' : 'none';
+  const stages = _runMode === 'short' ? SHORT_STAGES : _runMode === 'slideshow' ? SLIDESHOW_STAGES : _runMode === 'clipstory' ? CLIPSTORY_STAGES : STAGES;
   stages.forEach((_, i) => _setStage(i, 'pending'));
 }
 
 function _setStage(i, state) {
-  const prefix = _runMode === 'short' ? 'short-stage-' : _runMode === 'slideshow' ? 'slideshow-stage-' : 'stage-';
+  const prefix = _runMode === 'short' ? 'short-stage-' : _runMode === 'slideshow' ? 'slideshow-stage-' : _runMode === 'clipstory' ? 'clipstory-stage-' : 'stage-';
   const el = _q(prefix + i);
   if (!el) return;
   const base = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ';
@@ -555,7 +758,7 @@ function _handleEvent(ev) {
     const btn = _q('open-folder-btn');
     btn.style.display = '';
     btn.onclick = () => window.pywebview.api.open_output_folder(ev.output_path);
-    _setStage(_runMode === 'short' ? 6 : 7, 'complete');
+    _setStage(_runMode === 'short' ? 6 : _runMode === 'clipstory' ? 0 : 7, 'complete');
     _q('cancel-btn').style.display = 'none';
     _q('back-btn').style.display = '';
   }

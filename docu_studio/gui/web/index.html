@@ -202,6 +202,13 @@
           <p class="text-sm text-dim mt-3 leading-relaxed">Upload a set of images and write (or paste) a narration script. The app adds Ken Burns motion to each image, times it to your voiceover, and exports a finished video.</p>
           <button class="mt-6 bg-emerald-500 text-white font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-emerald-600 transition-colors pointer-events-none">Start slideshow →</button>
         </div>
+        <!-- Clip Story -->
+        <div onclick="startConfig('clipstory')" class="anim-card col-span-2 bg-card border border-border rounded-xl p-8 hover:border-amber-400 transition-colors cursor-pointer">
+          <div class="text-xs font-semibold tracking-widest text-amber-400">CLIP STORY MODE</div>
+          <div class="text-xl font-semibold text-white mt-2">Compile your own footage into a narrated video</div>
+          <p class="text-sm text-dim mt-3 leading-relaxed">Upload your own video clips in order, trim each one, and write (or flag for AI generation) narration for each — the app fits the narration to each clip's actual length and stitches them together.</p>
+          <button class="mt-6 bg-amber-500 text-white font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-amber-600 transition-colors pointer-events-none">Start Clip Story →</button>
+        </div>
       </div>
 
       <!-- Recent runs -->
@@ -436,6 +443,46 @@
           </div>
         </div>
 
+        <!-- Topic (clipstory) -->
+        <div id="clipstory-topic-row" class="mt-6" style="display:none">
+          <label class="text-sm font-medium text-dim block">Topic</label>
+          <input id="clipstory-topic-input" type="text"
+            placeholder="e.g. Our trip to the mountains"
+            class="mt-2 w-full bg-input border border-border rounded-lg px-4 py-3 text-white text-sm focus:border-accent focus:outline-none placeholder-faint">
+        </div>
+
+        <!-- Output canvas (clipstory) -->
+        <div id="clipstory-canvas-row" class="mt-6" style="display:none">
+          <label class="text-sm font-medium text-dim block">Output canvas</label>
+          <select id="clipstory-canvas-select"
+            class="mt-2 w-full bg-input border border-border rounded-lg px-4 py-3 text-white text-sm focus:border-accent focus:outline-none">
+            <option value="16:9">16:9 widescreen (1920 × 1080)</option>
+            <option value="9:16">9:16 vertical (1080 × 1920)</option>
+          </select>
+        </div>
+
+        <!-- Clips (clipstory) -->
+        <div id="clipstory-clips-row" class="mt-6" style="display:none">
+          <label class="text-sm font-medium text-dim block">Video clips</label>
+          <button onclick="browseClipStoryClips()" type="button"
+            class="mt-2 px-4 py-2 rounded-lg text-sm font-semibold bg-card border border-border text-dim hover:text-white hover:border-bstrong transition-colors">
+            Choose videos…
+          </button>
+          <div id="clipstory-clip-list" class="mt-3 space-y-3"></div>
+        </div>
+
+        <!-- Generate narration + review (clipstory) -->
+        <div id="clipstory-review-row" class="mt-6" style="display:none">
+          <div class="flex items-center justify-between">
+            <label class="text-sm font-medium text-dim block">Narration review</label>
+            <button id="clipstory-generate-btn" onclick="generateClipStoryNarration()" type="button" disabled
+              class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-card border border-border text-faint cursor-not-allowed transition-colors">
+              Generate Narration
+            </button>
+          </div>
+          <div id="clipstory-review-list" class="mt-3 space-y-3"></div>
+        </div>
+
         <!-- Start button -->
         <button id="start-run-btn" onclick="startRun()"
           class="mt-8 bg-accent text-app font-bold text-base px-8 py-3.5 rounded-xl w-full hover:bg-adark transition-colors">
@@ -483,6 +530,9 @@
         <div id="slideshow-stage-0" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>TTS</div>
         <div id="slideshow-stage-1" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Assembly</div>
         <div id="slideshow-stage-2" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Mux</div>
+      </div>
+      <div class="flex flex-wrap gap-2" id="clipstory-stage-track" style="display:none">
+        <div id="clipstory-stage-0" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-hover text-faint border border-border"><span class="stage-dot w-2 h-2 rounded-full bg-faint"></span>Assembly</div>
       </div>
 
       <!-- Log -->
