@@ -162,7 +162,7 @@ def generate_shorts_script(
     """Generate a TTS-safe shorts script and per-sentence visual queries for *topic*.
 
     Word target uses the stored calibration WPM for *tts_provider*+*tts_voice*
-    when one exists (see shorts_tts_calibration), falling back to the 170 WPM
+    when one exists (see docu_studio.common.tts_calibration), falling back to the 170 WPM
     default — the configured TTS voice may speak markedly slower/faster than
     that default, and using its measured pace keeps the synthesized audio
     close to *duration_seconds*.
