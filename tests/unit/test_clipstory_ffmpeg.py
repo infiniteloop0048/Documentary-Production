@@ -189,6 +189,18 @@ class TestConcatSegmentsWithXfade:
                     ["/a.mp4", "/b.mp4"], [10.0, 8.0], 0.5, "/out.mp4",
                 )
 
+    def test_fps_normalized_before_xfade_for_every_segment(self, wrapper: ClipStoryFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.concat_segments_with_xfade(
+                ["/a.mp4", "/b.mp4", "/c.mp4"], [10.0, 8.0, 6.0], 0.5, "/out.mp4",
+            )
+        args = mock_run.call_args[0][0]
+        fc = args[args.index("-filter_complex") + 1]
+        assert "[0:v]fps=30[v0]" in fc
+        assert "[1:v]fps=30[v1]" in fc
+        assert "[2:v]fps=30[v2]" in fc
+
 
 class TestApplyReconciliationNoneBranchErrorHandling:
     def test_copy_failure_raises_ffmpeg_error_not_os_error(self, wrapper: ClipStoryFFmpeg) -> None:

@@ -169,10 +169,11 @@ class ClipStoryFFmpeg(FFmpegWrapper):
             raise ValueError("concat_segments_with_xfade requires at least 2 segments")
         offsets = self._xfade_offsets(durations, transition_duration)
 
-        stages = []
-        prev_v, prev_a = "[0:v]", "[0:a]"
+        fps_stages = ";".join(f"[{i}:v]fps=30[v{i}]" for i in range(n))
+        stages = [fps_stages]
+        prev_v, prev_a = "[v0]", "[0:a]"
         for i in range(1, n):
-            next_v, next_a = f"[{i}:v]", f"[{i}:a]"
+            next_v, next_a = f"[v{i}]", f"[{i}:a]"
             is_last = i == n - 1
             out_v = "[vout]" if is_last else f"[x{i}v]"
             out_a = "[aout]" if is_last else f"[x{i}a]"
