@@ -12,7 +12,6 @@ from dataclasses import dataclass
 
 from docu_studio.adapters.llm.base import LLMProvider
 from docu_studio.clipstory.clipstory_config import ClipSpec
-from docu_studio.common.tts_calibration import get_wpm
 
 _log = logging.getLogger(__name__)
 
@@ -73,7 +72,8 @@ def build_coordinated_prompt(topic: str, segments: list[SegmentPlan]) -> str:
 
 def parse_coordinated_response(response: str, expected_count: int) -> dict[int, str] | None:
     """Split *response* by '===SEGMENT n===' markers. Returns {index: text} only if
-    exactly *expected_count* segments were found — never guess-splits a partial match."""
+    exactly *expected_count* segments were found with contiguous indices 0..(expected_count-1)
+    — never guess-splits a partial match."""
     matches = list(_SEGMENT_DELIMITER_RE.finditer(response))
     if len(matches) != expected_count:
         _log.warning(
@@ -86,6 +86,13 @@ def parse_coordinated_response(response: str, expected_count: int) -> dict[int, 
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(response)
         result[int(m.group(1))] = response[start:end].strip()
+    # Validate that indices are contiguous: {0, 1, ..., expected_count - 1}
+    if set(result.keys()) != set(range(expected_count)):
+        _log.warning(
+            "Clip Story coordinated response segment indices mismatch: got %s, expected %s",
+            sorted(result.keys()), list(range(expected_count)),
+        )
+        return None
     return result
 
 

@@ -65,6 +65,16 @@ class TestParseCoordinatedResponse:
         response = "===SEGMENT 0===\nOnly one segment.\n"
         assert parse_coordinated_response(response, expected_count=2) is None
 
+    def test_duplicate_indices_with_right_count_returns_none(self) -> None:
+        """Right count but wrong indices (e.g., 0, 0 instead of 0, 1) should return None."""
+        response = "===SEGMENT 0===\nFirst text.\n===SEGMENT 0===\nDuplicate again.\n"
+        assert parse_coordinated_response(response, expected_count=2) is None
+
+    def test_non_contiguous_indices_returns_none(self) -> None:
+        """Indices 0, 2 instead of 0, 1 should return None."""
+        response = "===SEGMENT 0===\nFirst text.\n===SEGMENT 2===\nThird text.\n"
+        assert parse_coordinated_response(response, expected_count=2) is None
+
 
 class TestGenerateCoordinatedNarration:
     def test_single_call_success(self) -> None:
@@ -108,6 +118,22 @@ class TestGenerateCoordinatedNarration:
         ]
         result = generate_coordinated_narration("Topic", segments, llm)
         assert result == {1: "Newly generated text."}
+
+    def test_wrong_indices_same_count_retries_then_fails(self) -> None:
+        """Right segment count but wrong indices (e.g., 0, 0) should trigger retry and raise RuntimeError, not KeyError."""
+        llm = MagicMock()
+        llm.generate_script.return_value = (
+            "===SEGMENT 0===\nFirst text.\n===SEGMENT 0===\nDuplicate again.\n"
+        )
+        segments = [
+            SegmentPlan(index=0, fixed_text=None, target_words=10),
+            SegmentPlan(index=1, fixed_text=None, target_words=10),
+        ]
+        # Should raise RuntimeError about parse failure, not KeyError on dict access
+        with pytest.raises(RuntimeError, match="could not parse"):
+            generate_coordinated_narration("Topic", segments, llm)
+        # Verify both retries were attempted
+        assert llm.generate_script.call_count == 2
 
 
 class TestPrepareNarrationReview:
