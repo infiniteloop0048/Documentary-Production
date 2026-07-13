@@ -1,11 +1,12 @@
 """Persisted per-(TTS provider, voice) words-per-minute calibration.
 
-The 170 WPM default used for word-target math assumes a brisk TTS voice;
-several configured providers/voices actually speak closer to 120-130 WPM,
-which was overshooting the requested short duration. This module stores a
-rolling measured WPM per provider+voice (JSON file in the OS config dir,
-mirroring history/run_history.py's atomic-write pattern) so script
-generation can target the pace the configured voice actually produces.
+Shared by Shorts and Clip Story (and any future pipeline needing to target a word
+count from a duration): the 170 WPM default used for word-target math assumes a
+brisk TTS voice; several configured providers/voices actually speak closer to
+120-130 WPM. This module stores a rolling measured WPM per provider+voice (JSON
+file in the OS config dir, mirroring history/run_history.py's atomic-write
+pattern) so script generation can target the pace the configured voice actually
+produces.
 """
 from __future__ import annotations
 

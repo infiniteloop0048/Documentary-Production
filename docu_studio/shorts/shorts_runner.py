@@ -27,7 +27,7 @@ from docu_studio.shorts.shorts_config import ShortsConfig
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_log import QueueLoggingHandler, ShortsTeeQueue
 from docu_studio.shorts.shorts_script_gen import generate_shorts_script
-from docu_studio.shorts.shorts_tts_calibration import record_measurement
+from docu_studio.common.tts_calibration import record_measurement
 
 
 class ShortsRunStatus(str, Enum):

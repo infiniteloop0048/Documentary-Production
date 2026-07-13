@@ -11,11 +11,11 @@ from docu_studio.shorts.shorts_script_gen import (
     split_sentences,
     target_word_count,
 )
-from docu_studio.shorts.shorts_tts_calibration import record_measurement
+from docu_studio.common.tts_calibration import record_measurement
 
 
 def _patched_calibration(tmp_path: Path):
-    return patch("docu_studio.shorts.shorts_tts_calibration.config_dir", return_value=tmp_path)
+    return patch("docu_studio.common.tts_calibration.config_dir", return_value=tmp_path)
 
 
 class TestTargetWordCount:

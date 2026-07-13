@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from docu_studio.adapters.llm.base import LLMProvider
 from docu_studio.shorts.music_providers import DEFAULT_MUSIC_MOOD
-from docu_studio.shorts.shorts_tts_calibration import get_wpm
+from docu_studio.common.tts_calibration import get_wpm
 
 _log = logging.getLogger(__name__)
 

@@ -1,10 +1,10 @@
-"""Unit tests for shorts_tts_calibration: persisted per-(provider, voice) WPM."""
+"""Unit tests for common/tts_calibration: persisted per-(provider, voice) WPM."""
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import patch
 
-from docu_studio.shorts.shorts_tts_calibration import (
+from docu_studio.common.tts_calibration import (
     CALIBRATION_MAX_WPM,
     CALIBRATION_MIN_WPM,
     calibration_key,
@@ -15,7 +15,7 @@ from docu_studio.shorts.shorts_tts_calibration import (
 
 
 def _patched(tmp_path: Path):
-    return patch("docu_studio.shorts.shorts_tts_calibration.config_dir", return_value=tmp_path)
+    return patch("docu_studio.common.tts_calibration.config_dir", return_value=tmp_path)
 
 
 class TestCalibrationKey:
