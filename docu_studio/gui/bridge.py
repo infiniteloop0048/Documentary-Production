@@ -10,11 +10,15 @@ import queue
 import subprocess
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import webview
 
 from docu_studio.config import key_cache
 from docu_studio.config.settings import Settings
+
+if TYPE_CHECKING:
+    from docu_studio.clipstory.clipstory_ffmpeg import ClipStoryFFmpeg
 
 
 def duration_to_minutes(minutes: int, seconds: int) -> float:
@@ -23,6 +27,17 @@ def duration_to_minutes(minutes: int, seconds: int) -> float:
     if total <= 0:
         raise ValueError("Target duration must be greater than 0 seconds.")
     return total
+
+
+def _validate_clip_trim(path: str, trim_out: float, ffmpeg: "ClipStoryFFmpeg") -> None:
+    """Raise ValueError if trim_out exceeds the clip's real (ffprobed) duration.
+    Called before constructing a ClipSpec, since that's the boundary where the
+    real file is available to check against."""
+    duration = ffmpeg.get_duration(path)
+    if trim_out > duration:
+        raise ValueError(
+            f"Clip {path!r}: trim_out ({trim_out:.2f}s) exceeds clip duration ({duration:.2f}s)"
+        )
 
 
 class Bridge:
@@ -405,6 +420,7 @@ class Bridge:
             self._active_mode = "clipstory"
             from docu_studio.adapters.tts.factory import build_tts
             from docu_studio.clipstory.clipstory_config import ClipSpec, ClipStoryConfig
+            from docu_studio.clipstory.clipstory_ffmpeg import ClipStoryFFmpeg
             from docu_studio.clipstory.clipstory_runner import ClipStoryRunner
 
             s = self._settings
@@ -429,16 +445,19 @@ class Bridge:
                 else Path.home() / "DocuStudio"
             )
 
-            clip_specs = [
-                ClipSpec(
-                    path=c["path"],
-                    trim_in=float(c["trim_in"]),
-                    trim_out=float(c["trim_out"]),
-                    script_text=c.get("script_text", ""),
-                    use_llm_generation=bool(c.get("use_llm_generation", False)),
+            ffmpeg = ClipStoryFFmpeg()
+            clip_specs = []
+            for c in config.get("clips", []):
+                _validate_clip_trim(c["path"], float(c["trim_out"]), ffmpeg)
+                clip_specs.append(
+                    ClipSpec(
+                        path=c["path"],
+                        trim_in=float(c["trim_in"]),
+                        trim_out=float(c["trim_out"]),
+                        script_text=c.get("script_text", ""),
+                        use_llm_generation=bool(c.get("use_llm_generation", False)),
+                    )
                 )
-                for c in config.get("clips", [])
-            ]
             clipstory_config = ClipStoryConfig(
                 topic=config.get("topic", ""),
                 clips=clip_specs,
@@ -518,6 +537,7 @@ class Bridge:
         try:
             from docu_studio.adapters.llm.factory import build_llm
             from docu_studio.clipstory.clipstory_config import ClipSpec
+            from docu_studio.clipstory.clipstory_ffmpeg import ClipStoryFFmpeg
             from docu_studio.clipstory.clipstory_script_gen import (
                 CLIPSTORY_DEFAULT_WPM,
                 prepare_narration_review,
@@ -540,16 +560,19 @@ class Bridge:
             tts_voice = getattr(s, "deepgram_voice", "aura-asteria-en")
             wpm = get_wpm(tts_prov, tts_voice, default=CLIPSTORY_DEFAULT_WPM)
 
-            clip_specs = [
-                ClipSpec(
-                    path=c["path"],
-                    trim_in=float(c["trim_in"]),
-                    trim_out=float(c["trim_out"]),
-                    script_text=c.get("script_text", ""),
-                    use_llm_generation=bool(c.get("use_llm_generation", False)),
+            ffmpeg = ClipStoryFFmpeg()
+            clip_specs = []
+            for c in clips:
+                _validate_clip_trim(c["path"], float(c["trim_out"]), ffmpeg)
+                clip_specs.append(
+                    ClipSpec(
+                        path=c["path"],
+                        trim_in=float(c["trim_in"]),
+                        trim_out=float(c["trim_out"]),
+                        script_text=c.get("script_text", ""),
+                        use_llm_generation=bool(c.get("use_llm_generation", False)),
+                    )
                 )
-                for c in clips
-            ]
             review = prepare_narration_review(topic, clip_specs, llm, wpm)
             return {"ok": True, "review": review}
         except Exception as exc:
@@ -704,10 +727,11 @@ class Bridge:
             from docu_studio.clipstory.clipstory_ffmpeg import ClipStoryFFmpeg
 
             ffmpeg = ClipStoryFFmpeg()
+            poster_dir = Path(tempfile.mkdtemp(prefix="docu_studio_clipstory_poster_"))
             clips = []
-            for path in paths:
+            for i, path in enumerate(paths):
                 duration = ffmpeg.get_duration(path)
-                poster_path = str(Path(tempfile.mkdtemp(prefix="docu_studio_clipstory_poster_")) / "poster.jpg")
+                poster_path = str(poster_dir / f"poster_{i}.jpg")
                 ffmpeg.extract_poster_frame(path, min(1.0, duration / 2), poster_path)
                 clips.append({"path": path, "duration": duration, "poster_path": poster_path})
             return {"ok": True, "clips": clips}

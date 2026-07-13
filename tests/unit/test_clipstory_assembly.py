@@ -35,7 +35,7 @@ class TestAssembleClipStoryHappyPath:
         mock_ffmpeg.normalize_clip.assert_called_once()
         mock_ffmpeg.apply_atempo.assert_called_once()
         mock_ffmpeg.mux_audio_video.assert_called_once()
-        mock_ffmpeg.concat_scenes.assert_called_once()
+        mock_ffmpeg.concat_segments.assert_called_once()
 
     def test_multiple_clips_all_processed_in_order(self, mock_ffmpeg, tmp_path: Path) -> None:
         clips = [
@@ -49,7 +49,7 @@ class TestAssembleClipStoryHappyPath:
         assemble_clip_story(config, tts, tmp_path, tmp_path / "out.mp4")
         assert mock_ffmpeg.trim_clip.call_count == 2
         assert mock_ffmpeg.mux_audio_video.call_count == 2
-        concat_args = mock_ffmpeg.concat_scenes.call_args[0][0]
+        concat_args = mock_ffmpeg.concat_segments.call_args[0][0]
         assert len(concat_args) == 2
 
 
@@ -62,7 +62,7 @@ class TestAssembleClipStoryLayer3Halt:
         with pytest.raises(ClipStoryFitError, match="target=10.00s"):
             assemble_clip_story(config, tts, tmp_path, tmp_path / "out.mp4")
         mock_ffmpeg.apply_atempo.assert_not_called()
-        mock_ffmpeg.concat_scenes.assert_not_called()
+        mock_ffmpeg.concat_segments.assert_not_called()
 
 
 class TestAssembleClipStoryReconciliation:

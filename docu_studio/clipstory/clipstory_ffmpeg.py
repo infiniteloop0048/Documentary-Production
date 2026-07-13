@@ -73,3 +73,35 @@ class ClipStoryFFmpeg(FFmpegWrapper):
             capture_output=True, text=True,
         )
         self._check(result, f"extract_poster_frame → {output_path!r}")
+
+    def concat_segments(
+        self, input_paths: list[str], output_resolution: str, output_path: str
+    ) -> None:
+        """Concatenate already-normalized Clip Story segments into the final
+        output, scaling to the project's chosen canvas. Segments are already
+        uniform resolution/SAR/pixfmt (normalize_clip already ran on each), so
+        this only needs to guarantee a consistent fps before concatenation —
+        unlike the shared concat_scenes (media/ffmpeg_wrapper.py), which
+        hardcodes 1920x1080 for the always-16:9 Documentary pipeline."""
+        if output_resolution not in _OUTPUT_RESOLUTIONS:
+            raise ValueError(f"Unknown output_resolution: {output_resolution!r}")
+        w, h = _OUTPUT_RESOLUTIONS[output_resolution]
+        n = len(input_paths)
+        scale_parts = ";".join(f"[{i}:v]fps=30,scale={w}:{h}[v{i}]" for i in range(n))
+        interleaved = "".join(f"[v{i}][{i}:a]" for i in range(n))
+        filter_complex = scale_parts + f";{interleaved}concat=n={n}:v=1:a=1[outv][outa]"
+        cmd = [self._ffmpeg, "-y"]
+        for p in input_paths:
+            cmd += ["-i", p]
+        cmd += [
+            "-filter_complex", filter_complex,
+            "-map", "[outv]",
+            "-map", "[outa]",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "22",
+            "-c:a", "aac",
+            output_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        self._check(result, f"concat_segments → {output_path!r}")

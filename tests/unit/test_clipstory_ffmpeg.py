@@ -98,3 +98,26 @@ class TestExtractPosterFrame:
         assert "-ss" in args
         assert args[args.index("-ss") + 1] == "1.5"
         assert "-frames:v" in args
+
+
+class TestConcatSegments:
+    def test_16_9_scales_to_1920x1080(self, wrapper: ClipStoryFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.concat_segments(["/a.mp4", "/b.mp4"], "16:9", "/out.mp4")
+        args = mock_run.call_args[0][0]
+        fc = args[args.index("-filter_complex") + 1]
+        assert "scale=1920:1080" in fc
+        assert "concat=n=2:v=1:a=1" in fc
+
+    def test_9_16_scales_to_1080x1920(self, wrapper: ClipStoryFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.concat_segments(["/a.mp4", "/b.mp4"], "9:16", "/out.mp4")
+        args = mock_run.call_args[0][0]
+        fc = args[args.index("-filter_complex") + 1]
+        assert "scale=1080:1920" in fc
+
+    def test_unknown_resolution_raises(self, wrapper: ClipStoryFFmpeg) -> None:
+        with pytest.raises(ValueError, match="output_resolution"):
+            wrapper.concat_segments(["/a.mp4"], "4:3", "/out.mp4")

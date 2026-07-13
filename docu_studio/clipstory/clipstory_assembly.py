@@ -88,5 +88,6 @@ def assemble_clip_story(
         return
 
     # Segments are already uniform resolution/SAR/pixfmt (normalize_clip) and
-    # already have narration muxed in — concat_scenes just hard-cuts them together.
-    ffmpeg.concat_scenes(segment_paths, str(output_path))
+    # already have narration muxed in — concat_segments just hard-cuts them
+    # together, scaled to the project's chosen canvas (16:9 or 9:16).
+    ffmpeg.concat_segments(segment_paths, config.output_resolution, str(output_path))
