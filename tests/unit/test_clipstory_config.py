@@ -55,3 +55,35 @@ class TestClipStoryConfig:
         clips = [ClipSpec(path="/a.mp4", trim_in=0.0, trim_out=10.0, script_text="Hi.")]
         config = ClipStoryConfig(topic="Test", clips=clips, output_resolution="9:16")
         assert config.output_resolution == "9:16"
+
+
+class TestClipStoryConfigPhase2Fields:
+    def test_defaults_match_phase1_behavior(self) -> None:
+        clips = [ClipSpec(path="/a.mp4", trim_in=0.0, trim_out=10.0, script_text="Hi.")]
+        config = ClipStoryConfig(topic="Test", clips=clips)
+        assert config.transition == "cut"
+        assert config.captions is False
+        assert config.music_enabled is False
+        assert config.music_provider == "jamendo"
+        assert config.music_folder == ""
+        assert config.jamendo_client_id == ""
+
+    def test_crossfade_transition_accepted(self) -> None:
+        clips = [ClipSpec(path="/a.mp4", trim_in=0.0, trim_out=10.0, script_text="Hi.")]
+        config = ClipStoryConfig(topic="Test", clips=clips, transition="crossfade")
+        assert config.transition == "crossfade"
+
+    def test_invalid_transition_raises(self) -> None:
+        clips = [ClipSpec(path="/a.mp4", trim_in=0.0, trim_out=10.0, script_text="Hi.")]
+        with pytest.raises(ValueError, match="transition"):
+            ClipStoryConfig(topic="Test", clips=clips, transition="wipe")
+
+    def test_local_folder_music_provider_accepted(self) -> None:
+        clips = [ClipSpec(path="/a.mp4", trim_in=0.0, trim_out=10.0, script_text="Hi.")]
+        config = ClipStoryConfig(topic="Test", clips=clips, music_provider="local_folder")
+        assert config.music_provider == "local_folder"
+
+    def test_invalid_music_provider_raises(self) -> None:
+        clips = [ClipSpec(path="/a.mp4", trim_in=0.0, trim_out=10.0, script_text="Hi.")]
+        with pytest.raises(ValueError, match="music_provider"):
+            ClipStoryConfig(topic="Test", clips=clips, music_provider="spotify")
