@@ -458,12 +458,19 @@ class Bridge:
                         use_llm_generation=bool(c.get("use_llm_generation", False)),
                     )
                 )
+            jamendo_client_id = key_cache.get("docu_studio_jamendo") or ""
             clipstory_config = ClipStoryConfig(
                 topic=config.get("topic", ""),
                 clips=clip_specs,
                 output_resolution=config.get("output_resolution", "16:9"),
                 tts_provider=tts_prov,
                 tts_voice=tts_voice,
+                transition=config.get("transition", "cut"),
+                captions=bool(config.get("captions", False)),
+                music_enabled=bool(config.get("music_enabled", False)),
+                music_provider=config.get("music_provider", "jamendo"),
+                music_folder=config.get("music_folder", ""),
+                jamendo_client_id=jamendo_client_id,
             )
 
             self._runner = ClipStoryRunner(config=clipstory_config, tts=tts, output_base=output_base)
