@@ -40,7 +40,10 @@ class Bridge:
     _SLIDESHOW_STAGE_MAP = {
         "tts": 0, "assembly": 1, "mux": 2, "done": 2, "complete": 2,
     }
-    _FINAL_STAGE_INDEX_BY_MODE = {"doc": 7, "shorts": 6, "slideshow": 2}
+    _CLIPSTORY_STAGE_MAP = {
+        "assembly": 0, "done": 0, "complete": 0,
+    }
+    _FINAL_STAGE_INDEX_BY_MODE = {"doc": 7, "shorts": 6, "slideshow": 2, "clipstory": 0}
 
     def __init__(self):
         self._window: webview.Window | None = None
@@ -395,6 +398,76 @@ class Bridge:
             import traceback
             return {"ok": False, "error": str(exc) + "\n" + traceback.format_exc()}
 
+    def start_clipstory_run(self, config: dict) -> dict:
+        if self._run_thread and self._run_thread.is_alive():
+            return {"ok": False, "error": "A run is already in progress"}
+        try:
+            self._active_mode = "clipstory"
+            from docu_studio.adapters.tts.factory import build_tts
+            from docu_studio.clipstory.clipstory_config import ClipSpec, ClipStoryConfig
+            from docu_studio.clipstory.clipstory_runner import ClipStoryRunner
+
+            s = self._settings
+            tts_prov = getattr(s, "tts_provider", "elevenlabs")
+            tts_key = (
+                key_cache.get("docu_studio_elevenlabs")
+                if tts_prov == "elevenlabs"
+                else key_cache.get("docu_studio_deepgram_key")
+            )
+            tts_voice = getattr(s, "deepgram_voice", "aura-asteria-en")
+            tts = build_tts(tts_prov, tts_key or "", tts_voice)
+
+            while not self._event_q.empty():
+                try:
+                    self._event_q.get_nowait()
+                except queue.Empty:
+                    break
+
+            output_base = (
+                Path(s.output_folder)
+                if getattr(s, "output_folder", None)
+                else Path.home() / "DocuStudio"
+            )
+
+            clip_specs = [
+                ClipSpec(
+                    path=c["path"],
+                    trim_in=float(c["trim_in"]),
+                    trim_out=float(c["trim_out"]),
+                    script_text=c.get("script_text", ""),
+                    use_llm_generation=bool(c.get("use_llm_generation", False)),
+                )
+                for c in config.get("clips", [])
+            ]
+            clipstory_config = ClipStoryConfig(
+                topic=config.get("topic", ""),
+                clips=clip_specs,
+                output_resolution=config.get("output_resolution", "16:9"),
+                tts_provider=tts_prov,
+                tts_voice=tts_voice,
+            )
+
+            self._runner = ClipStoryRunner(config=clipstory_config, tts=tts, output_base=output_base)
+
+            def _run() -> None:
+                try:
+                    self._runner.run()
+                except Exception as exc:
+                    import traceback
+                    self._event_q.put({
+                        "type": "error",
+                        "message": str(exc) + "\n" + traceback.format_exc(),
+                    })
+
+            self._run_thread = threading.Thread(target=_run, daemon=True)
+            self._run_thread.start()
+            threading.Thread(target=self._translate_events, daemon=True).start()
+            return {"ok": True}
+
+        except Exception as exc:
+            import traceback
+            return {"ok": False, "error": str(exc) + "\n" + traceback.format_exc()}
+
     def fetch_slideshow_images(self, topic: str, count: int) -> dict:
         try:
             import tempfile
@@ -438,6 +511,47 @@ class Bridge:
 
             script_text = _generate_slideshow_script(topic, int(image_count), llm)
             return {"ok": True, "script_text": script_text}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def generate_clipstory_narration(self, topic: str, clips: list[dict]) -> dict:
+        try:
+            from docu_studio.adapters.llm.factory import build_llm
+            from docu_studio.clipstory.clipstory_config import ClipSpec
+            from docu_studio.clipstory.clipstory_script_gen import (
+                CLIPSTORY_DEFAULT_WPM,
+                prepare_narration_review,
+            )
+            from docu_studio.common.tts_calibration import get_wpm
+
+            s = self._settings
+            provider = getattr(s, "llm_provider", "Anthropic")
+            model = getattr(s, "llm_model", "claude-sonnet-4-5")
+            key_map = {
+                "Anthropic": key_cache.get("docu_studio_anthropic"),
+                "OpenAI": key_cache.get("docu_studio_openai"),
+                "OpenRouter": key_cache.get("docu_studio_openrouter"),
+                "Groq": key_cache.get("docu_studio_groq"),
+            }
+            llm_key = key_map.get(provider, "") or ""
+            llm = build_llm(provider, llm_key, model)
+
+            tts_prov = getattr(s, "tts_provider", "elevenlabs")
+            tts_voice = getattr(s, "deepgram_voice", "aura-asteria-en")
+            wpm = get_wpm(tts_prov, tts_voice, default=CLIPSTORY_DEFAULT_WPM)
+
+            clip_specs = [
+                ClipSpec(
+                    path=c["path"],
+                    trim_in=float(c["trim_in"]),
+                    trim_out=float(c["trim_out"]),
+                    script_text=c.get("script_text", ""),
+                    use_llm_generation=bool(c.get("use_llm_generation", False)),
+                )
+                for c in clips
+            ]
+            review = prepare_narration_review(topic, clip_specs, llm, wpm)
+            return {"ok": True, "review": review}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -516,6 +630,7 @@ class Bridge:
         stage_map = (
             self._SHORTS_STAGE_MAP if self._active_mode == "shorts"
             else self._SLIDESHOW_STAGE_MAP if self._active_mode == "slideshow"
+            else self._CLIPSTORY_STAGE_MAP if self._active_mode == "clipstory"
             else self._STAGE_MAP
         )
         final_idx = self._FINAL_STAGE_INDEX_BY_MODE.get(self._active_mode, 7)
@@ -571,6 +686,33 @@ class Bridge:
             file_types=("Image Files (*.jpg;*.jpeg;*.png;*.webp;*.bmp)", "All files (*.*)"),
         )
         return list(result) if result else []
+
+    def browse_videos(self) -> list[str]:
+        if not self._window:
+            return []
+        result = self._window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=True,
+            file_types=("Video Files (*.mp4;*.mov;*.mkv;*.webm;*.avi)", "All files (*.*)"),
+        )
+        return list(result) if result else []
+
+    def get_clip_metadata(self, paths: list[str]) -> dict:
+        try:
+            import tempfile
+
+            from docu_studio.clipstory.clipstory_ffmpeg import ClipStoryFFmpeg
+
+            ffmpeg = ClipStoryFFmpeg()
+            clips = []
+            for path in paths:
+                duration = ffmpeg.get_duration(path)
+                poster_path = str(Path(tempfile.mkdtemp(prefix="docu_studio_clipstory_poster_")) / "poster.jpg")
+                ffmpeg.extract_poster_frame(path, min(1.0, duration / 2), poster_path)
+                clips.append({"path": path, "duration": duration, "poster_path": poster_path})
+            return {"ok": True, "clips": clips}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def open_output_folder(self, path: str) -> dict:
         try:
