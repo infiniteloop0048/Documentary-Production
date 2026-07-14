@@ -13,6 +13,7 @@ from pathlib import Path
 
 from docu_studio.common.ffmpeg_finalize import finalize_filter
 from docu_studio.media.ffmpeg_wrapper import FFmpegWrapper
+from docu_studio.shorts.shorts_config import SHORTS_HEIGHT, SHORTS_WIDTH
 
 _log = logging.getLogger(__name__)
 
@@ -25,9 +26,6 @@ _MOTION_ANALYSIS_FPS = 5
 _MOTION_DETECT_TIMEOUT = 20.0
 # 40% into the clip — inside the spec's required 20-60% fallback band.
 _FALLBACK_WINDOW_FRACTION = 0.4
-
-SHORTS_WIDTH = 1080
-SHORTS_HEIGHT = 1920
 
 _PUNCH_CARD_BG = "0x141620"
 _PUNCH_FONT_NAME = "DejaVu Sans"
@@ -218,23 +216,26 @@ class ShortsFFmpeg(FFmpegWrapper):
                 best_avg, best_start = avg, start
         return best_start
 
-    def vertical_convert(self, input_path: str, output_path: str, strategy: str) -> None:
-        """Convert *input_path* to a 1080x1920 vertical video.
+    def vertical_convert(
+        self, input_path: str, output_path: str, strategy: str,
+        out_width: int = SHORTS_WIDTH, out_height: int = SHORTS_HEIGHT,
+    ) -> None:
+        """Convert *input_path* to an *out_width*x*out_height* video.
 
         strategy='center_crop': scale to fill the target frame, crop the excess width.
         strategy='blur_pad': blurred scaled-fill copy behind an aspect-fit foreground.
         """
         if strategy == "blur_pad":
             chain = (
-                f"[0:v]scale={SHORTS_WIDTH}:{SHORTS_HEIGHT}:force_original_aspect_ratio=increase,"
-                f"crop={SHORTS_WIDTH}:{SHORTS_HEIGHT},gblur=sigma=20[bg];"
-                f"[0:v]scale={SHORTS_WIDTH}:{SHORTS_HEIGHT}:force_original_aspect_ratio=decrease[fg];"
+                f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=increase,"
+                f"crop={out_width}:{out_height},gblur=sigma=20[bg];"
+                f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=decrease[fg];"
                 f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
             )
         else:
             chain = (
-                f"[0:v]scale={SHORTS_WIDTH}:{SHORTS_HEIGHT}:force_original_aspect_ratio=increase,"
-                f"crop={SHORTS_WIDTH}:{SHORTS_HEIGHT}"
+                f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=increase,"
+                f"crop={out_width}:{out_height}"
             )
         filter_complex = f"{finalize_filter(chain)}[vout]"
         cmd = [
@@ -251,7 +252,8 @@ class ShortsFFmpeg(FFmpegWrapper):
         self._check(result, f"vertical_convert({strategy}) → {output_path!r}")
 
     def apply_ken_burns(
-        self, input_path: str, output_path: str, duration: float, direction: str, pan: bool
+        self, input_path: str, output_path: str, duration: float, direction: str, pan: bool,
+        out_width: int = SHORTS_WIDTH, out_height: int = SHORTS_HEIGHT,
     ) -> None:
         """Apply a slow zoompan (Ken Burns) effect over the exact *duration* of the clip.
 
@@ -281,11 +283,11 @@ class ShortsFFmpeg(FFmpegWrapper):
         else:
             x_expr = "iw/2-(iw/zoom/2)"
         y_expr = "ih/2-(ih/zoom/2)"
-        upscale_dim = SHORTS_WIDTH * 4
+        upscale_dim = out_width * 4
         vf = finalize_filter(
             f"scale={upscale_dim}:-2:flags=lanczos,"
             f"zoompan=z='{zoom_expr}':x='{x_expr}':y='{y_expr}':"
-            f"d={frames}:s={SHORTS_WIDTH}x{SHORTS_HEIGHT}:fps={fps}"
+            f"d={frames}:s={out_width}x{out_height}:fps={fps}"
         )
         cmd = [
             self._ffmpeg, "-y",
@@ -317,7 +319,10 @@ class ShortsFFmpeg(FFmpegWrapper):
         result = subprocess.run(cmd, capture_output=True, text=True)
         self._check(result, f"apply_speed_ramp(factor={speed_factor}) → {output_path!r}")
 
-    def generate_punch_card(self, output_path: str, text: str, duration: float) -> None:
+    def generate_punch_card(
+        self, output_path: str, text: str, duration: float,
+        out_width: int = SHORTS_WIDTH, out_height: int = SHORTS_HEIGHT,
+    ) -> None:
         """Render a *duration*-second full-frame punch card: theme-dark
         background, huge bold centered white text, with a quick scale-in.
 
@@ -338,8 +343,8 @@ class ShortsFFmpeg(FFmpegWrapper):
         ass_content = (
             "[Script Info]\n"
             "ScriptType: v4.00+\n"
-            f"PlayResX: {SHORTS_WIDTH}\n"
-            f"PlayResY: {SHORTS_HEIGHT}\n"
+            f"PlayResX: {out_width}\n"
+            f"PlayResY: {out_height}\n"
             "WrapStyle: 0\n"
             "ScaledBorderAndShadow: yes\n"
             "YCbCr Matrix: TV.601\n\n"
@@ -363,7 +368,7 @@ class ShortsFFmpeg(FFmpegWrapper):
         cmd = [
             self._ffmpeg, "-y",
             "-f", "lavfi",
-            "-i", f"color=c={_PUNCH_CARD_BG}:s={SHORTS_WIDTH}x{SHORTS_HEIGHT}:d={duration}:r={fps}",
+            "-i", f"color=c={_PUNCH_CARD_BG}:s={out_width}x{out_height}:d={duration}:r={fps}",
             "-vf", finalize_filter(f"subtitles={ass_name}"),
             "-t", str(duration),
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
