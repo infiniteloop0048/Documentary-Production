@@ -28,17 +28,39 @@ from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_log import QueueLoggingHandler, ShortsTeeQueue
 from docu_studio.shorts.shorts_script_gen import generate_shorts_script
 from docu_studio.shorts.shorts_tts_join import SilenceTrimParams
-from docu_studio.shorts.shorts_tts_synthesis import synthesize_sentences_sequential
+from docu_studio.shorts.shorts_tts_synthesis import (
+    synthesize_sentences_concurrent,
+    synthesize_sentences_sequential,
+)
 from docu_studio.common.tts_calibration import record_measurement
 
-# gTTS-calibrated silence-trim parameters (Task 2), reused here to join
-# per-sentence gTTS clips back together — each sentence file IS gTTS output
-# at this join layer, so the same real-audio-measured values apply. Other
-# TTS providers get their own calibrated SilenceTrimParams in Phase 2 rather
-# than reusing these.
+# gTTS-calibrated silence-trim parameters (Task 2, verified via real-audio
+# silencedetect), reused here to join per-sentence gTTS clips back together
+# — each sentence file IS gTTS output at this join layer, so the same
+# real-audio-measured values apply.
 _GTTS_JOIN_PARAMS = SilenceTrimParams(
     threshold_db="-45dB", pad_seconds=0.08, min_nonsilent_seconds=0.02, window_seconds=0.02,
 )
+
+# PLACEHOLDER — NOT yet calibrated against real ElevenLabs/Deepgram audio.
+# Reusing gTTS's measured values as a structurally-reasonable starting point
+# only; a real silencedetect calibration pass (same methodology as Task 2)
+# against each provider's own real output is required before these can be
+# trusted, and is blocked pending real API keys for both providers.
+_ELEVENLABS_JOIN_PARAMS = SilenceTrimParams(
+    threshold_db="-45dB", pad_seconds=0.08, min_nonsilent_seconds=0.02, window_seconds=0.02,
+)
+_DEEPGRAM_JOIN_PARAMS = SilenceTrimParams(
+    threshold_db="-45dB", pad_seconds=0.08, min_nonsilent_seconds=0.02, window_seconds=0.02,
+)
+
+# ElevenLabs: cap-1 (sequential) — its free tier's own concurrency ceiling is
+# exactly 2, so running our own pool at cap-2 would leave zero margin; the
+# @retry decorator exists for occasional failures, not routine ones (Task 4
+# decision). Deepgram: cap-2 — confirmed against Deepgram's current docs at
+# 15 concurrent on Pay-as-you-go/Growth tiers, wide margin.
+_ELEVENLABS_MAX_CONCURRENCY = 1
+_DEEPGRAM_MAX_CONCURRENCY = 2
 
 
 class ShortsRunStatus(str, Enum):
@@ -149,10 +171,7 @@ class ShortsRunner(threading.Thread):
             message=f"Synthesizing voiceover ({len(script.sentences)} sentences)…",
         ))
         audio_path = str(self._project_folder / "audio" / "short.mp3")
-        synthesize_sentences_sequential(
-            self.tts, script.sentences, self._project_folder / "audio",
-            audio_path, _GTTS_JOIN_PARAMS,
-        )
+        self._synthesize_voiceover(script.sentences, audio_path)
         audio_duration = ffmpeg.get_duration(audio_path)
         self.event_queue.put(LogEvent(message=f"Voiceover: {audio_duration:.2f}s", level=LogLevel.INFO))
         measured_wpm = record_measurement(
@@ -211,6 +230,29 @@ class ShortsRunner(threading.Thread):
                 f"{self.config.duration_seconds}s requested."
             ),
         ))
+
+    def _synthesize_voiceover(self, sentences: list[str], audio_path: str) -> None:
+        """Dispatch to the per-provider synthesis strategy: gTTS stays fully
+        sequential (concurrent load is a plausible way to worsen its own
+        documented flakiness, not help it — Task 4 Section 1); ElevenLabs
+        uses cap-1 bounded concurrency (functionally sequential, but through
+        the same mechanism Deepgram uses, so a future tier-adaptive cap
+        wouldn't need a new code path); Deepgram uses cap-2 (confirmed
+        margin against its documented rate limits)."""
+        work_dir = self._project_folder / "audio"
+        provider = (self._tts_provider or "").lower()
+        if provider == "elevenlabs":
+            synthesize_sentences_concurrent(
+                self.tts, sentences, work_dir, audio_path,
+                _ELEVENLABS_JOIN_PARAMS, max_concurrency=_ELEVENLABS_MAX_CONCURRENCY,
+            )
+        elif provider == "deepgram":
+            synthesize_sentences_concurrent(
+                self.tts, sentences, work_dir, audio_path,
+                _DEEPGRAM_JOIN_PARAMS, max_concurrency=_DEEPGRAM_MAX_CONCURRENCY,
+            )
+        else:
+            synthesize_sentences_sequential(self.tts, sentences, work_dir, audio_path, _GTTS_JOIN_PARAMS)
 
     def _cancelled(self) -> bool:
         if self.cancel_event.is_set():
