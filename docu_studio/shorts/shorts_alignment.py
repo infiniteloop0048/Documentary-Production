@@ -74,14 +74,25 @@ def _interpolate(
     overlapping/duplicate ASS caption cues downstream — see the shorts
     subtitle-blinking investigation). Leading runs are back-filled from the
     first matched word's start; trailing runs are forward-filled from the
-    last matched word's end; middle runs whose matched neighbors leave no
-    positive span (left.end >= right.start — e.g. a misordered Whisper
-    match) are forward-filled from left.end the same way a trailing run
-    would be, since the right bound can't be trusted to leave room. A middle
-    run with a genuinely positive but too-tight span is widened to the
-    minimum instead of using the tight span directly. If nothing matched at
-    all, returns an all-zero-duration timeline — get_word_timestamps' caller
-    is expected to fall back to Tier 3 rather than rely on this in practice,
+    last matched word's end.
+
+    A middle run whose matched neighbors leave too little room (a genuinely
+    tight positive span, a zero span, or left.end >= right.start — e.g. a
+    misordered Whisper match) is widened to the minimum by *centering* the
+    minimum span on the midpoint of [left.end, right.start], rather than
+    anchoring purely at left.end. Centering matters: anchoring at left.end
+    alone (the original approach) dumps the *entire* widening overshoot onto
+    the right neighbor — confirmed against a real capture
+    (Climate_Change_20260711_014823) where a 7-word run had left.end ==
+    right.start exactly, and the right neighbor's own real Whisper-matched
+    Start ended up displayed 0.35s (the full min_span) later than its true
+    timestamp once generate_ass's monotonicity guard propagated the
+    overshoot forward. Centering instead splits that overshoot across both
+    neighbors, halving the worst-case desync against either one to
+    min_span/2 — small, deterministic, and self-correcting at the very next
+    well-matched anchor, never unbounded drift. If nothing matched at all,
+    returns an all-zero-duration timeline — get_word_timestamps' caller is
+    expected to fall back to Tier 3 rather than rely on this in practice,
     but it stays well-defined here regardless."""
     n = len(script_words)
     if n == 0:
@@ -113,13 +124,17 @@ def _interpolate(
         elif left is None:
             span_end = right.start
             span_start = max(0.0, span_end - min_span)
-        elif right is None or left.end >= right.start:
+        elif right is None:
             span_start = left.end
             span_end = span_start + min_span
         else:
-            span_start, span_end = left.end, right.start
-            if span_end - span_start < min_span:
+            raw_start, raw_end = left.end, right.start
+            if raw_end - raw_start < min_span:
+                center = (raw_start + raw_end) / 2.0
+                span_start = max(0.0, center - min_span / 2.0)
                 span_end = span_start + min_span
+            else:
+                span_start, span_end = raw_start, raw_end
 
         step = (span_end - span_start) / count
         for k in range(count):

@@ -118,16 +118,42 @@ class TestInterpolateDirect:
         assert result[1].start == pytest.approx(0.2)
         assert result[-1].end == pytest.approx(0.2 + 3 * _MIN_INTERP_WORD_SPAN)
 
+    def test_zero_gap_middle_run_bounds_desync_to_half_min_span_each_side(self) -> None:
+        """Exact reproduction of the real Climate_Change_20260711_014823 root
+        cause: left.end == right.start exactly (Whisper measured zero real
+        time for 7 spoken words). The old left.end-anchored approach forward-
+        filled the whole min_span (0.35s) onto the right neighbor, displaying
+        its real matched Start 0.35s later than Whisper actually measured it.
+        Centering bounds that desync to min_span/2 (0.175s) on each side."""
+        script_words = ["extreme", "weather", "events", "are", "projected", "to", "increase", "by"]
+        matched = [
+            (21.46, 21.94), None, None, None, None, None, None, (21.94, 22.2),
+        ]
+        result = _interpolate(script_words, matched)
+        interpolated = result[1:7]
+        min_span = 6 * _MIN_INTERP_WORD_SPAN
+        assert 21.94 - interpolated[0].start == pytest.approx(min_span / 2)
+        assert interpolated[-1].end - 21.94 == pytest.approx(min_span / 2)
+        # the real matched "by" keeps its own true Whisper timestamp untouched
+        # by _interpolate (generate_ass's separate monotonicity guard is what
+        # ultimately reconciles display order downstream).
+        assert result[7].start == pytest.approx(21.94)
+
     def test_middle_run_with_misordered_neighbors_still_gets_positive_span(self) -> None:
         """left.end (0.5) >= right.start (0.3) — a genuinely misordered Whisper
         match. The interpolated word can't satisfy both anchors at once, but it
-        must still get a real positive span anchored to left.end rather than
-        collapsing to a single identical/zero-duration timestamp."""
+        must still get a real positive span, centered on the midpoint of
+        [left.end, right.start] rather than anchored purely to left.end — so
+        the desync from either anchor is bounded to min_span/2, not dumped
+        entirely onto one side (see the class-level regression test for why:
+        anchoring at left.end alone can push a real matched word's displayed
+        Start a full min_span late)."""
         script_words = ["a", "b", "c"]
         matched = [(0.0, 0.5), None, (0.3, 0.6)]
         result = _interpolate(script_words, matched)
-        assert result[1].start == pytest.approx(0.5)
-        assert result[1].end == pytest.approx(0.5 + _MIN_INTERP_WORD_SPAN)
+        # midpoint of [0.5, 0.3] = 0.4, centered span = [0.4 - 0.025, 0.4 + 0.025]
+        assert result[1].start == pytest.approx(0.375)
+        assert result[1].end == pytest.approx(0.425)
         assert result[1].end > result[1].start
 
     def test_middle_run_with_too_tight_positive_span_is_widened(self) -> None:
@@ -146,7 +172,9 @@ class TestInterpolateDirect:
         capture: 7 consecutive unmatched words squeezed between neighbors only
         0.05s apart (21.94 -> 21.99), previously collapsing to a single
         identical timestamp for all 7. Each word must now get its own
-        strictly increasing, minimum-readable span."""
+        strictly increasing, minimum-readable span, centered on the anchors'
+        midpoint so neither the left nor the right real match is pushed more
+        than min_span/2 away from its true timestamp."""
         script_words = ["w0", "w1", "w2", "w3", "w4", "w5", "w6", "w7", "w8"]
         matched = [(0.0, 21.94), None, None, None, None, None, None, None, (21.99, 22.5)]
         result = _interpolate(script_words, matched)
@@ -154,4 +182,9 @@ class TestInterpolateDirect:
         assert _no_duplicate_or_decreasing_starts(interpolated)
         for word in interpolated:
             assert word.end - word.start == pytest.approx(_MIN_INTERP_WORD_SPAN)
-        assert interpolated[0].start == pytest.approx(21.94)
+        # midpoint of [21.94, 21.99] = 21.965, centered span = [21.965 - 0.175, 21.965 + 0.175]
+        assert interpolated[0].start == pytest.approx(21.79)
+        assert interpolated[-1].end == pytest.approx(22.14)
+        # exact zero-gap bound is covered separately by
+        # test_zero_gap_middle_run_bounds_desync_to_half_min_span_each_side,
+        # which reproduces the real capture's left.end == right.start case.
