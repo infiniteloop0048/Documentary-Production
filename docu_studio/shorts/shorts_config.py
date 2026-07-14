@@ -10,10 +10,18 @@ SHORTS_MAX_DURATION = 60
 SHORTS_DEFAULT_DURATION = 30
 SHORTS_WPM = 170
 
+SHORTS_ASPECT_DIMENSIONS: dict[str, tuple[int, int]] = {
+    "9:16": (SHORTS_WIDTH, SHORTS_HEIGHT),
+    "16:9": (1920, 1080),
+    "1:1": (1080, 1080),
+}
+SHORTS_DEFAULT_ASPECT = "9:16"
+
 
 @dataclass
 class ShortsConfig:
     topic: str
+    aspect_ratio: str = SHORTS_DEFAULT_ASPECT
     duration_seconds: int = SHORTS_DEFAULT_DURATION
     captions_enabled: bool = True
     music_enabled: bool = True
@@ -28,3 +36,12 @@ class ShortsConfig:
                 f"duration_seconds must be between {SHORTS_MIN_DURATION} and "
                 f"{SHORTS_MAX_DURATION}, got {self.duration_seconds}"
             )
+        if self.aspect_ratio not in SHORTS_ASPECT_DIMENSIONS:
+            raise ValueError(
+                f"aspect_ratio must be one of {sorted(SHORTS_ASPECT_DIMENSIONS)}, "
+                f"got {self.aspect_ratio!r}"
+            )
+
+    @property
+    def output_dimensions(self) -> tuple[int, int]:
+        return SHORTS_ASPECT_DIMENSIONS[self.aspect_ratio]

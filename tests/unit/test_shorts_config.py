@@ -4,6 +4,8 @@ from __future__ import annotations
 import pytest
 
 from docu_studio.shorts.shorts_config import (
+    SHORTS_ASPECT_DIMENSIONS,
+    SHORTS_DEFAULT_ASPECT,
     SHORTS_DEFAULT_DURATION,
     SHORTS_HEIGHT,
     SHORTS_MAX_DURATION,
@@ -48,3 +50,28 @@ class TestShortsConfig:
         assert cfg.speed_ramp_enabled is True
         assert cfg.punch_enabled is False
         assert cfg.loop_revisit_enabled is True
+
+
+class TestShortsAspectRatio:
+    def test_default_aspect_is_9_16(self) -> None:
+        cfg = ShortsConfig(topic="x")
+        assert cfg.aspect_ratio == SHORTS_DEFAULT_ASPECT
+        assert cfg.output_dimensions == (1080, 1920)
+
+    def test_16_9_dimensions(self) -> None:
+        cfg = ShortsConfig(topic="x", aspect_ratio="16:9")
+        assert cfg.output_dimensions == (1920, 1080)
+
+    def test_1_1_dimensions(self) -> None:
+        cfg = ShortsConfig(topic="x", aspect_ratio="1:1")
+        assert cfg.output_dimensions == (1080, 1080)
+
+    def test_unknown_aspect_ratio_raises(self) -> None:
+        with pytest.raises(ValueError, match="aspect_ratio"):
+            ShortsConfig(topic="x", aspect_ratio="4:3")
+
+    def test_all_known_aspect_ratios_present(self) -> None:
+        assert set(SHORTS_ASPECT_DIMENSIONS) == {"9:16", "16:9", "1:1"}
+
+    def test_default_aspect_dimensions_match_legacy_constants(self) -> None:
+        assert SHORTS_ASPECT_DIMENSIONS[SHORTS_DEFAULT_ASPECT] == (SHORTS_WIDTH, SHORTS_HEIGHT)
