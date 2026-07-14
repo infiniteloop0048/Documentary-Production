@@ -14,6 +14,13 @@ from pathlib import Path
 
 from docu_studio.shorts.capability_resolvers import WordTiming
 
+# Minimum span given to any interpolated (unmatched) word, so a run of
+# unmatched words never collapses to identical/zero-duration timestamps.
+# Matches captions.py's _MIN_WORD_DURATION floor in spirit, but kept as an
+# independent constant since interpolation and ASS-rendering are separate
+# concerns that shouldn't be coupled by a shared import.
+_MIN_INTERP_WORD_SPAN = 0.05
+
 
 def _normalize_word(word: str) -> str:
     """Lowercase and strip surrounding punctuation for matching purposes."""
@@ -59,11 +66,34 @@ def _interpolate(
     script_words: list[str], matched: list[tuple[float, float] | None]
 ) -> list[WordTiming]:
     """Fill in timing for unmatched words by linear interpolation between the
-    nearest matched neighbors. Leading unmatched runs collapse to the first
-    matched word's start; trailing runs collapse to the last matched word's
-    end. If nothing matched at all, returns an all-zero-duration timeline —
-    get_word_timestamps' caller is expected to fall back to Tier 3 rather than
-    rely on this in practice, but it stays well-defined here regardless."""
+    nearest matched neighbors.
+
+    Every unmatched run is given a strictly positive, evenly-spaced span of
+    at least _MIN_INTERP_WORD_SPAN per word, so no run ever collapses to
+    identical/zero-duration timestamps (the previous behavior, which produced
+    overlapping/duplicate ASS caption cues downstream — see the shorts
+    subtitle-blinking investigation). Leading runs are back-filled from the
+    first matched word's start; trailing runs are forward-filled from the
+    last matched word's end.
+
+    A middle run whose matched neighbors leave too little room (a genuinely
+    tight positive span, a zero span, or left.end >= right.start — e.g. a
+    misordered Whisper match) is widened to the minimum by *centering* the
+    minimum span on the midpoint of [left.end, right.start], rather than
+    anchoring purely at left.end. Centering matters: anchoring at left.end
+    alone (the original approach) dumps the *entire* widening overshoot onto
+    the right neighbor — confirmed against a real capture
+    (Climate_Change_20260711_014823) where a 7-word run had left.end ==
+    right.start exactly, and the right neighbor's own real Whisper-matched
+    Start ended up displayed 0.35s (the full min_span) later than its true
+    timestamp once generate_ass's monotonicity guard propagated the
+    overshoot forward. Centering instead splits that overshoot across both
+    neighbors, halving the worst-case desync against either one to
+    min_span/2 — small, deterministic, and self-correcting at the very next
+    well-matched anchor, never unbounded drift. If nothing matched at all,
+    returns an all-zero-duration timeline — get_word_timestamps' caller is
+    expected to fall back to Tier 3 rather than rely on this in practice,
+    but it stays well-defined here regardless."""
     n = len(script_words)
     if n == 0:
         return []
@@ -86,19 +116,27 @@ def _interpolate(
             j += 1
         left = result[i - 1] if i > 0 else None
         right = result[j] if j < n else None
+        count = j - i
+        min_span = count * _MIN_INTERP_WORD_SPAN
 
         if left is None and right is None:
-            span_start, span_end = 0.0, 0.0  # unreachable given the any(matched) guard
+            span_start, span_end = 0.0, min_span  # unreachable given the any(matched) guard
         elif left is None:
-            span_start, span_end = right.start, right.start
+            span_end = right.start
+            span_start = max(0.0, span_end - min_span)
         elif right is None:
-            span_start, span_end = left.end, left.end
+            span_start = left.end
+            span_end = span_start + min_span
         else:
-            span_start, span_end = left.end, right.start
+            raw_start, raw_end = left.end, right.start
+            if raw_end - raw_start < min_span:
+                center = (raw_start + raw_end) / 2.0
+                span_start = max(0.0, center - min_span / 2.0)
+                span_end = span_start + min_span
+            else:
+                span_start, span_end = raw_start, raw_end
 
-        count = j - i
-        span = max(0.0, span_end - span_start)
-        step = span / count if count else 0.0
+        step = (span_end - span_start) / count
         for k in range(count):
             w_start = span_start + step * k
             w_end = span_start + step * (k + 1)
