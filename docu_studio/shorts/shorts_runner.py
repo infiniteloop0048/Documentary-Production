@@ -27,7 +27,18 @@ from docu_studio.shorts.shorts_config import ShortsConfig
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_log import QueueLoggingHandler, ShortsTeeQueue
 from docu_studio.shorts.shorts_script_gen import generate_shorts_script
+from docu_studio.shorts.shorts_tts_join import SilenceTrimParams
+from docu_studio.shorts.shorts_tts_synthesis import synthesize_sentences_sequential
 from docu_studio.common.tts_calibration import record_measurement
+
+# gTTS-calibrated silence-trim parameters (Task 2), reused here to join
+# per-sentence gTTS clips back together — each sentence file IS gTTS output
+# at this join layer, so the same real-audio-measured values apply. Other
+# TTS providers get their own calibrated SilenceTrimParams in Phase 2 rather
+# than reusing these.
+_GTTS_JOIN_PARAMS = SilenceTrimParams(
+    threshold_db="-45dB", pad_seconds=0.08, min_nonsilent_seconds=0.02, window_seconds=0.02,
+)
 
 
 class ShortsRunStatus(str, Enum):
@@ -133,9 +144,16 @@ class ShortsRunner(threading.Thread):
         if self._cancelled():
             return
 
-        self.event_queue.put(ProgressEvent(stage="Short TTS", message="Synthesizing voiceover…"))
+        self.event_queue.put(ProgressEvent(
+            stage="Short TTS",
+            message=f"Synthesizing voiceover ({len(script.sentences)} sentences)…",
+        ))
         audio_path = str(self._project_folder / "audio" / "short.mp3")
-        audio_duration = self.tts.synthesize(script.text, audio_path)
+        synthesize_sentences_sequential(
+            self.tts, script.sentences, self._project_folder / "audio",
+            audio_path, _GTTS_JOIN_PARAMS,
+        )
+        audio_duration = ffmpeg.get_duration(audio_path)
         self.event_queue.put(LogEvent(message=f"Voiceover: {audio_duration:.2f}s", level=LogLevel.INFO))
         measured_wpm = record_measurement(
             self._tts_provider, self._tts_voice,
