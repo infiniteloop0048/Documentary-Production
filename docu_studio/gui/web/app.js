@@ -692,6 +692,7 @@ async function startRun() {
     startPolling();
     const res = await window.pywebview.api.start_shorts_run({
       topic, duration_seconds: secs,
+      aspect_ratio: _q('shorts-aspect-select').value,
       captions_enabled: _q('captions-toggle').checked,
       music_enabled: _q('music-toggle').checked,
       beat_sync_enabled: _q('beat-sync-toggle').checked,
