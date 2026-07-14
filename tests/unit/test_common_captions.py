@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 
 from docu_studio.common.captions import (
+    _MIN_WORD_DURATION,
     WordTiming,
     estimate_word_timestamps,
     generate_ass,
@@ -231,6 +232,64 @@ class TestGaplessEvents:
         boundary_end = events[3][1]
         next_group_start = events[4][0]
         assert boundary_end == next_group_start
+
+
+class TestNonMonotonicGuard:
+    """Regression coverage for the subtitle-blinking/duplicate-cue bug: word
+    timing can arrive non-monotonic or with duplicate timestamps from Tier 2
+    Whisper interpolation (see shorts_alignment.py's _interpolate fix), and
+    generate_ass must never emit an overlapping/duplicate Dialogue event
+    regardless of what the upstream tier hands it — this is the defensive
+    guard, independent of whether the upstream producer was itself fixed."""
+
+    def test_duplicate_start_and_end_become_strictly_increasing(self) -> None:
+        # Mirrors the real captured bug: two consecutive words sharing an
+        # identical Start AND End (Lighthouses_..._214129, idx 0-1).
+        timings = [
+            WordTiming(word="seventy", start=1.34, end=1.39),
+            WordTiming(word="percent", start=1.34, end=1.39),
+            WordTiming(word="of", start=1.39, end=1.50),
+            WordTiming(word="the", start=1.50, end=1.60),
+        ]
+        ass = generate_ass(timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=2.0)
+        events = _dialogue_times(ass)
+        starts = [s for s, _ in events]
+        assert starts == sorted(set(starts)) and len(set(starts)) == len(starts)
+        for start, end in events:
+            assert end - start >= _MIN_WORD_DURATION - 1e-9
+        for (_, end), (next_start, _) in zip(events, events[1:]):
+            assert end == next_start  # still gapless
+
+    def test_non_monotonic_decreasing_start_still_produces_valid_events(self) -> None:
+        # A later word's Start earlier than an earlier word's Start (e.g. a
+        # misordered Whisper match) must not invert the emitted event order.
+        timings = [
+            WordTiming(word="a", start=0.5, end=0.6),
+            WordTiming(word="b", start=0.3, end=0.4),
+            WordTiming(word="c", start=0.6, end=0.7),
+        ]
+        ass = generate_ass(timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=1.0)
+        events = _dialogue_times(ass)
+        starts = [s for s, _ in events]
+        assert starts == sorted(starts)
+        assert len(set(starts)) == len(starts)
+        for start, end in events:
+            assert end > start
+
+    def test_chain_of_identical_timestamps_expands_to_readable_spans(self) -> None:
+        # Mirrors the real Climate_Change_20260711_014823 capture: 7
+        # consecutive words all pinned to ~the same instant.
+        timings = [
+            WordTiming(word=f"w{i}", start=21.94, end=21.99) for i in range(7)
+        ]
+        ass = generate_ass(timings, SHORTS_WIDTH, SHORTS_HEIGHT, audio_duration=25.0)
+        events = _dialogue_times(ass)
+        starts = [s for s, _ in events]
+        assert starts == sorted(set(starts)) and len(set(starts)) == len(starts)
+        for start, end in events:
+            assert end - start >= _MIN_WORD_DURATION - 1e-9
+        for (_, end), (next_start, _) in zip(events, events[1:]):
+            assert end == next_start
 
 
 class TestWriteAssFile:

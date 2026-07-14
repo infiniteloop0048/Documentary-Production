@@ -175,14 +175,36 @@ def generate_ass(
         for group in groups
         for active_index, word in enumerate(group)
     ]
+
+    # Defensive monotonicity guard: word-level timing can come from any of
+    # Shorts' 3 tiers (or Slideshow's Tier-3-only estimator), and Tier 2's
+    # Whisper-alignment interpolation can hand back timestamps that aren't
+    # strictly increasing even after the interpolate()-side fix (e.g. a
+    # genuinely misordered Whisper match). Since these events are gapless
+    # (each event's End is pinned to the *next* event's Start), a
+    # non-increasing Start here would make an earlier event's computed End
+    # land before a later event's Start, producing an overlapping/duplicate
+    # Dialogue cue. Normalizing to a strictly increasing sequence up front —
+    # floored at _MIN_WORD_DURATION between consecutive starts — guarantees
+    # every emitted cue is both non-overlapping and holds on screen long
+    # enough to read, regardless of what the upstream tier produced.
+    starts: list[float] = []
+    prev_start: float | None = None
+    for _, _, word in flat:
+        s = word.start
+        if prev_start is not None and s < prev_start + _MIN_WORD_DURATION:
+            s = prev_start + _MIN_WORD_DURATION
+        starts.append(s)
+        prev_start = s
+
     for i, (group, active_index, word) in enumerate(flat):
-        start = word.start
+        start = starts[i]
         if i + 1 < len(flat):
-            next_start = flat[i + 1][2].start
+            next_start = starts[i + 1]
         elif audio_duration is not None:
             next_start = audio_duration
         else:
-            next_start = word.end
+            next_start = max(word.end, start)
         end_seconds = max(next_start, start + _MIN_WORD_DURATION)
 
         if punch_window is not None:
