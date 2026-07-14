@@ -131,6 +131,21 @@ async function browseSlideshowMusicFolder() {
   if (path) _q('slideshow-music-folder').value = path;
 }
 
+function onClipStoryMusicToggleChange() {
+  const on = _q('clipstory-music-toggle').checked;
+  _q('clipstory-music-provider-row').style.display = on ? '' : 'none';
+  if (on) onClipStoryMusicProviderChange(_q('clipstory-music-provider-select').value);
+}
+
+function onClipStoryMusicProviderChange(provider) {
+  _q('clipstory-music-folder-row').style.display = provider === 'local_folder' ? '' : 'none';
+}
+
+async function browseClipStoryMusicFolder() {
+  const path = await window.pywebview.api.browse_folder();
+  if (path) _q('clipstory-music-folder').value = path;
+}
+
 async function saveSettings() {
   const btn = _q('save-btn');
   btn.textContent = 'Saving…'; btn.disabled = true;
@@ -246,7 +261,11 @@ function startConfig(mode) {
   _q('clipstory-canvas-row').style.display = mode === 'clipstory' ? '' : 'none';
   _q('clipstory-clips-row').style.display = mode === 'clipstory' ? '' : 'none';
   _q('clipstory-review-row').style.display = mode === 'clipstory' ? '' : 'none';
+  _q('clipstory-transition-row').style.display = mode === 'clipstory' ? '' : 'none';
+  _q('clipstory-captions-row').style.display = mode === 'clipstory' ? '' : 'none';
+  _q('clipstory-music-row').style.display = mode === 'clipstory' ? '' : 'none';
   onSlideshowMusicToggleChange();
+  onClipStoryMusicToggleChange();
   showScreen('config');
 }
 
@@ -421,14 +440,23 @@ function _renderClipStoryReview() {
     const targetDuration = (clip.trimOut - clip.trimIn).toFixed(1);
     const row = document.createElement('div');
     row.className = 'bg-input border border-border rounded-lg px-3 py-3 text-sm text-white';
-    row.innerHTML = `
-      <div class="text-xs text-faint">Clip ${Number(idx) + 1} — target ${targetDuration}s, estimated pace ${entry.pace_estimate_seconds.toFixed(1)}s</div>
-      <textarea rows="3" data-idx="${idx}" class="mt-1 w-full bg-panel border border-border rounded px-2 py-1 text-white text-xs">${entry.text}</textarea>
-    `;
-    row.querySelector('textarea').onchange = (e) => {
+
+    const label = document.createElement('div');
+    label.className = 'text-xs text-faint';
+    label.textContent = `Clip ${Number(idx) + 1} — target ${targetDuration}s, estimated pace ${entry.pace_estimate_seconds.toFixed(1)}s`;
+    row.appendChild(label);
+
+    const textarea = document.createElement('textarea');
+    textarea.rows = 3;
+    textarea.dataset.idx = idx;
+    textarea.className = 'mt-1 w-full bg-panel border border-border rounded px-2 py-1 text-white text-xs';
+    textarea.value = entry.text;
+    textarea.onchange = (e) => {
       _clipStoryReview[idx].text = e.target.value;
       _clipStoryClips[idx].scriptText = e.target.value;
     };
+    row.appendChild(textarea);
+
     list.appendChild(row);
   });
   const startBtn = _q('start-run-btn');
@@ -614,6 +642,11 @@ async function startRun() {
         path: c.path, trim_in: c.trimIn, trim_out: c.trimOut,
         script_text: _clipStoryReview[i].text, use_llm_generation: false,
       })),
+      transition: _q('clipstory-transition-select').value,
+      captions: _q('clipstory-captions-toggle').checked,
+      music_enabled: _q('clipstory-music-toggle').checked,
+      music_provider: _q('clipstory-music-provider-select').value,
+      music_folder: _q('clipstory-music-folder').value,
     });
     if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
     return;

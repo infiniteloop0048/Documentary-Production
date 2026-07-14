@@ -7,6 +7,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 _VALID_OUTPUT_RESOLUTIONS = ("16:9", "9:16")
+_VALID_TRANSITIONS = ("cut", "crossfade")
+_VALID_MUSIC_PROVIDERS = ("jamendo", "local_folder")
 
 
 @dataclass
@@ -42,6 +44,12 @@ class ClipStoryConfig:
     output_resolution: str = "16:9"
     tts_provider: str = ""
     tts_voice: str = ""
+    transition: str = "cut"
+    captions: bool = False
+    music_enabled: bool = False
+    music_provider: str = "jamendo"
+    music_folder: str = ""
+    jamendo_client_id: str = ""
 
     def __post_init__(self) -> None:
         if not self.clips:
@@ -50,4 +58,13 @@ class ClipStoryConfig:
             raise ValueError(
                 f"output_resolution must be one of {_VALID_OUTPUT_RESOLUTIONS}, "
                 f"got {self.output_resolution!r}"
+            )
+        if self.transition not in _VALID_TRANSITIONS:
+            raise ValueError(
+                f"transition must be one of {_VALID_TRANSITIONS}, got {self.transition!r}"
+            )
+        if self.music_provider not in _VALID_MUSIC_PROVIDERS:
+            raise ValueError(
+                f"music_provider must be one of {_VALID_MUSIC_PROVIDERS}, "
+                f"got {self.music_provider!r}"
             )
