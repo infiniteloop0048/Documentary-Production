@@ -532,3 +532,38 @@ class TestCollectClipsPerSentence:
         assert len(seen_sessions) == 3
         assert len(set(id(s) for s in seen_sessions)) == 1  # one shared Session for the whole batch
         assert len(set(seen_pacing_dicts)) == 1  # one shared pacing dict for the whole batch
+
+
+class TestBuildSegmentOutputDimensions:
+    def test_default_dimensions_pass_through_to_vertical_convert_and_ken_burns(
+        self, tmp_path: Path
+    ) -> None:
+        seg = Segment(index=0, start=0.0, duration=3.0, clip_index=0)
+        ffmpeg = _ffmpeg(raw_duration=20.0, motion_start=2.0, method="motion")
+
+        _build_segment(
+            seg, _CLIP, ffmpeg, tmp_path,
+            speed_ramp_enabled=False, sped_count=0, max_sped_segments=5,
+        )
+
+        vc_call = ffmpeg.vertical_convert.call_args
+        assert vc_call[0][3:] == (1080, 1920)
+        kb_call = ffmpeg.apply_ken_burns.call_args
+        assert kb_call[0][5:] == (1080, 1920)
+
+    def test_custom_dimensions_pass_through_to_vertical_convert_and_ken_burns(
+        self, tmp_path: Path
+    ) -> None:
+        seg = Segment(index=0, start=0.0, duration=3.0, clip_index=0)
+        ffmpeg = _ffmpeg(raw_duration=20.0, motion_start=2.0, method="motion")
+
+        _build_segment(
+            seg, _CLIP, ffmpeg, tmp_path,
+            speed_ramp_enabled=False, sped_count=0, max_sped_segments=5,
+            output_dimensions=(1920, 1080),
+        )
+
+        vc_call = ffmpeg.vertical_convert.call_args
+        assert vc_call[0][3:] == (1920, 1080)
+        kb_call = ffmpeg.apply_ken_burns.call_args
+        assert kb_call[0][5:] == (1920, 1080)

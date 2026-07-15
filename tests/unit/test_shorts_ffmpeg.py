@@ -439,3 +439,83 @@ class TestConcatSegmentsVideoOnly:
         concat_calls = [c for c in mock_run.call_args_list if "-filter_complex" in c.args[0]]
         assert len(concat_calls) == 1
         assert concat_calls[0].args[0][-1] == "/out.mp4"
+
+
+class TestVerticalConvertCustomDimensions:
+    def test_16_9_target_dimensions_appear_in_filter_chain(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.vertical_convert(
+                "/in.mp4", "/out.mp4", "center_crop", out_width=1920, out_height=1080,
+            )
+        args = mock_run.call_args[0][0]
+        filter_complex = args[args.index("-filter_complex") + 1]
+        assert "scale=1920:1080" in filter_complex
+        assert "crop=1920:1080" in filter_complex
+
+    def test_1_1_target_dimensions_appear_in_filter_chain(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.vertical_convert(
+                "/in.mp4", "/out.mp4", "blur_pad", out_width=1080, out_height=1080,
+            )
+        args = mock_run.call_args[0][0]
+        filter_complex = args[args.index("-filter_complex") + 1]
+        assert "scale=1080:1080" in filter_complex
+        assert "crop=1080:1080" in filter_complex
+
+    def test_default_dimensions_unchanged_when_omitted(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.vertical_convert("/in.mp4", "/out.mp4", "center_crop")
+        args = mock_run.call_args[0][0]
+        filter_complex = args[args.index("-filter_complex") + 1]
+        assert "scale=1080:1920" in filter_complex
+
+
+class TestApplyKenBurnsCustomDimensions:
+    def test_16_9_target_appears_in_zoompan_and_upscale(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_ken_burns(
+                "/in.mp4", "/out.mp4", 3.0, "in", False, out_width=1920, out_height=1080,
+            )
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert "s=1920x1080" in vf
+        assert "scale=7680:-2" in vf  # 1920 * 4
+
+    def test_default_dimensions_unchanged_when_omitted(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.apply_ken_burns("/in.mp4", "/out.mp4", 3.0, "in", False)
+        vf = mock_run.call_args[0][0][mock_run.call_args[0][0].index("-vf") + 1]
+        assert "s=1080x1920" in vf
+
+
+class TestGeneratePunchCardCustomDimensions:
+    def test_1_1_target_appears_in_playres_and_lavfi_source(
+        self, wrapper: ShortsFFmpeg, tmp_path
+    ) -> None:
+        output_path = str(tmp_path / "card.mp4")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.generate_punch_card(
+                output_path, "90 PERCENT", 1.0, out_width=1080, out_height=1080,
+            )
+        cmd = mock_run.call_args[0][0]
+        source = cmd[cmd.index("-i") + 1]
+        assert "s=1080x1080" in source
+        ass_content = (tmp_path / "card.mp4.card.ass").read_text(encoding="utf-8")
+        assert "PlayResX: 1080" in ass_content
+        assert "PlayResY: 1080" in ass_content
+
+    def test_default_dimensions_unchanged_when_omitted(
+        self, wrapper: ShortsFFmpeg, tmp_path
+    ) -> None:
+        output_path = str(tmp_path / "card.mp4")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.generate_punch_card(output_path, "90 PERCENT", 1.0)
+        cmd = mock_run.call_args[0][0]
+        source = cmd[cmd.index("-i") + 1]
+        assert "s=1080x1920" in source

@@ -296,6 +296,7 @@ class Bridge:
                 else Path.home() / "DocuStudio"
             )
             duration_seconds = int(config.get("duration_seconds", 30))
+            aspect_ratio = config.get("aspect_ratio", "9:16")
             captions_enabled = bool(config.get("captions_enabled", True))
             music_enabled = bool(config.get("music_enabled", True))
             beat_sync_enabled = bool(config.get("beat_sync_enabled", True))
@@ -326,6 +327,7 @@ class Bridge:
                 speed_ramp_enabled=speed_ramp_enabled,
                 punch_enabled=punch_enabled,
                 loop_revisit_enabled=loop_revisit_enabled,
+                aspect_ratio=aspect_ratio,
             )
 
             def _run() -> None:

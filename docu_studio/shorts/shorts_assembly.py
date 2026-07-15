@@ -326,6 +326,7 @@ def _build_segment(
     sped_count: int,
     max_sped_segments: int,
     avoid_start: float | None = None,
+    output_dimensions: tuple[int, int] = (SHORTS_WIDTH, SHORTS_HEIGHT),
 ) -> tuple[str, int, float]:
     """Build one footage segment: window/trim (+ optional speed ramp for a
     slow, long-source clip) -> vertical convert -> Ken Burns.
@@ -393,13 +394,13 @@ def _build_segment(
 
     strategy = choose_crop_strategy(clip["width"], clip["height"])
     vertical = str(scene_dir / f"seg_{seg.index:03d}_vertical.mp4")
-    ffmpeg.vertical_convert(windowed, vertical, strategy)
+    ffmpeg.vertical_convert(windowed, vertical, strategy, *output_dimensions)
     _log.info("Segment %d: crop_strategy=%s", seg.index, strategy)
 
     direction = "in" if seg.index % 2 == 0 else "out"
     pan = seg.index % 3 == 0
     kenburns = str(scene_dir / f"seg_{seg.index:03d}_kb.mp4")
-    ffmpeg.apply_ken_burns(vertical, kenburns, output_duration, direction, pan)
+    ffmpeg.apply_ken_burns(vertical, kenburns, output_duration, direction, pan, *output_dimensions)
 
     return kenburns, sped_count, start
 
@@ -490,6 +491,7 @@ def assemble_short(
     speed_ramp_enabled: bool = True,
     punch_enabled: bool = True,
     loop_revisit_enabled: bool = True,
+    output_dimensions: tuple[int, int] = (SHORTS_WIDTH, SHORTS_HEIGHT),
 ) -> None:
     """Build the final vertical short: fetch each sentence's own footage
     pool, resolve music (early, so its bpm is available for beat-sync),
@@ -594,7 +596,9 @@ def assemble_short(
                 punch_index = next(i for i, s in enumerate(new_segments) if s.is_punch)
                 punch_duration = window[1] - window[0]
                 rendered_path = str(scene_dir / f"seg_{punch_index:03d}_punch.mp4")
-                ffmpeg.generate_punch_card(rendered_path, script.punch[1], punch_duration)
+                ffmpeg.generate_punch_card(
+                    rendered_path, script.punch[1], punch_duration, *output_dimensions,
+                )
                 segments = new_segments
                 punch_window = window
                 prerendered_punch = (punch_index, rendered_path)
@@ -642,7 +646,7 @@ def assemble_short(
         try:
             path, sped_count, window_start = _build_segment(
                 seg, clip, ffmpeg, scene_dir, speed_ramp_enabled, sped_count, max_sped_segments,
-                avoid_start=avoid_start,
+                avoid_start=avoid_start, output_dimensions=output_dimensions,
             )
         except Exception as exc:
             _log.warning(
@@ -651,7 +655,7 @@ def assemble_short(
             )
             path, sped_count, window_start = _build_segment(
                 seg, clip, ffmpeg, scene_dir, False, sped_count, max_sped_segments,
-                avoid_start=None,
+                avoid_start=None, output_dimensions=output_dimensions,
             )
         if seg.index == 0:
             first_window_start = window_start
@@ -668,7 +672,7 @@ def assemble_short(
         try:
             ass_path = str(scene_dir / "captions.ass")
             write_ass_file(
-                timestamps, ass_path, SHORTS_WIDTH, SHORTS_HEIGHT,
+                timestamps, ass_path, *output_dimensions,
                 audio_duration=audio_duration, punch_window=punch_window,
             )
             captioned_path = str(scene_dir / "short_captioned.mp4")

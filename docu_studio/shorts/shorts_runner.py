@@ -90,10 +90,12 @@ class ShortsRunner(threading.Thread):
         speed_ramp_enabled: bool = True,
         punch_enabled: bool = True,
         loop_revisit_enabled: bool = True,
+        aspect_ratio: str = "9:16",
     ) -> None:
         super().__init__(daemon=True, name="ShortsRunner")
         self.config = ShortsConfig(
             topic=topic,
+            aspect_ratio=aspect_ratio,
             duration_seconds=duration_seconds,
             captions_enabled=captions_enabled,
             music_enabled=music_enabled,
@@ -216,6 +218,7 @@ class ShortsRunner(threading.Thread):
             speed_ramp_enabled=self.config.speed_ramp_enabled,
             punch_enabled=self.config.punch_enabled,
             loop_revisit_enabled=self.config.loop_revisit_enabled,
+            output_dimensions=self.config.output_dimensions,
         )
         if self._cancelled():
             return
