@@ -44,7 +44,14 @@ class TestSynthesize:
 class TestRetryBehavior:
     """New behavior: DeepgramAdapter previously had no retry at all — a gap
     that matters more once per-sentence synthesis means N independent calls
-    per video instead of 1 (Task 4 Section 1)."""
+    per video instead of 1 (Task 4 Section 1).
+
+    These tests call adapter.synthesize() directly, exercising the real
+    @retry decorator and the real method body (only requests.post is
+    mocked). They do NOT go through synthesize_sentences_concurrent's
+    ThreadPoolExecutor/future.result() wrapper — there is no test coverage
+    of retry behavior specifically as invoked through the concurrent
+    dispatch path, only of the adapter method it calls."""
 
     def test_succeeds_after_transient_failure(self, adapter: DeepgramAdapter, tmp_path: Path) -> None:
         calls = {"n": 0}
