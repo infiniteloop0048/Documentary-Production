@@ -2,10 +2,11 @@
 
 Focused on call order and file-naming correctness — actual silence-trim/join
 audio correctness is covered by test_shorts_tts_join.py, and the real-ffmpeg
-gTTS integration path by test_gtts_adapter.py. tts.synthesize and
-trim_and_join are both mocked here so these tests stay fast and isolated to
-"did the orchestration call the right things in the right order", not
-re-verify audio processing already tested elsewhere.
+gTTS integration path by test_gtts_adapter.py. tts.synthesize and the
+join functions (concat_audio / trim_and_join) are mocked here so these
+tests stay fast and isolated to "did the orchestration call the right
+things in the right order", not re-verify audio processing already tested
+elsewhere.
 """
 from __future__ import annotations
 
@@ -24,32 +25,40 @@ _PARAMS = SilenceTrimParams()
 
 
 class TestSynthesizeSentencesSequential:
+    """gTTS-only dispatch: the adapter already trims its own leading/
+    trailing silence per synthesize() call, so this joins already-clean
+    files with concat_audio() rather than re-trimming them with
+    trim_and_join() — re-trimming already-trimmed gTTS output was a real
+    bug (every sentence got the silenceremove filter applied twice, via
+    two independent lossy MP3 round-trips; see the Task A2 investigation).
+    A single sentence needs no join at all."""
+
     def test_calls_synthesize_once_per_sentence_in_order(self, tmp_path: Path) -> None:
         tts = MagicMock()
         tts.synthesize.side_effect = lambda text, path: Path(path).write_bytes(b"x") or 1.0
         sentences = ["First sentence.", "Second sentence.", "Third sentence."]
 
-        with patch("docu_studio.shorts.shorts_tts_synthesis.trim_and_join") as mock_join:
+        with patch("docu_studio.shorts.shorts_tts_synthesis.concat_audio") as mock_concat:
             synthesize_sentences_sequential(
-                tts, sentences, tmp_path, str(tmp_path / "final.mp3"), _PARAMS,
+                tts, sentences, tmp_path, str(tmp_path / "final.mp3"),
             )
 
         assert tts.synthesize.call_count == 3
         called_texts = [c.args[0] for c in tts.synthesize.call_args_list]
         assert called_texts == sentences
-        mock_join.assert_called_once()
+        mock_concat.assert_called_once()
 
     def test_writes_each_sentence_to_its_own_indexed_file(self, tmp_path: Path) -> None:
         tts = MagicMock()
         tts.synthesize.side_effect = lambda text, path: Path(path).write_bytes(b"x") or 1.0
         sentences = ["Alpha.", "Beta."]
 
-        with patch("docu_studio.shorts.shorts_tts_synthesis.trim_and_join") as mock_join:
+        with patch("docu_studio.shorts.shorts_tts_synthesis.concat_audio") as mock_concat:
             synthesize_sentences_sequential(
-                tts, sentences, tmp_path, str(tmp_path / "final.mp3"), _PARAMS,
+                tts, sentences, tmp_path, str(tmp_path / "final.mp3"),
             )
 
-        joined_input_paths = mock_join.call_args.args[0]
+        joined_input_paths = mock_concat.call_args.args[0]
         assert len(joined_input_paths) == 2
         assert joined_input_paths[0].name < joined_input_paths[1].name  # sentence 0 sorts before 1
         for p in joined_input_paths:
@@ -64,36 +73,46 @@ class TestSynthesizeSentencesSequential:
         tts.synthesize.side_effect = lambda text, path: Path(path).write_bytes(b"x") or 1.0
         sentences = [f"Sentence {i}." for i in range(5)]
 
-        with patch("docu_studio.shorts.shorts_tts_synthesis.trim_and_join") as mock_join:
+        with patch("docu_studio.shorts.shorts_tts_synthesis.concat_audio") as mock_concat:
             synthesize_sentences_sequential(
-                tts, sentences, tmp_path, str(tmp_path / "final.mp3"), _PARAMS,
+                tts, sentences, tmp_path, str(tmp_path / "final.mp3"),
             )
 
-        joined_input_paths = mock_join.call_args.args[0]
+        joined_input_paths = mock_concat.call_args.args[0]
         names = [p.name for p in joined_input_paths]
         assert names == sorted(names)
 
-    def test_passes_join_params_and_output_path_through(self, tmp_path: Path) -> None:
+    def test_passes_output_path_through_to_concat(self, tmp_path: Path) -> None:
         tts = MagicMock()
         tts.synthesize.side_effect = lambda text, path: Path(path).write_bytes(b"x") or 1.0
+        sentences = ["First sentence.", "Second sentence."]
         output_path = str(tmp_path / "final.mp3")
 
-        with patch("docu_studio.shorts.shorts_tts_synthesis.trim_and_join") as mock_join:
-            synthesize_sentences_sequential(tts, ["Only sentence."], tmp_path, output_path, _PARAMS)
+        with patch("docu_studio.shorts.shorts_tts_synthesis.concat_audio") as mock_concat:
+            synthesize_sentences_sequential(tts, sentences, tmp_path, output_path)
 
-        mock_join.assert_called_once_with(mock_join.call_args.args[0], output_path, _PARAMS)
+        mock_concat.assert_called_once_with(mock_concat.call_args.args[0], output_path)
 
-    def test_single_sentence_still_joins(self, tmp_path: Path) -> None:
+    def test_single_sentence_skips_join_and_copies_adapter_output_directly(self, tmp_path: Path) -> None:
+        """The len==1 case: nothing to join, so the adapter's already-
+        trimmed output becomes the final file via a plain file copy — no
+        second trim_silence() call, no concat_audio() call, no additional
+        lossy MP3 encode/decode pass at all."""
         tts = MagicMock()
-        tts.synthesize.side_effect = lambda text, path: Path(path).write_bytes(b"x") or 1.0
+        tts.synthesize.side_effect = lambda text, path: Path(path).write_bytes(b"only-sentence-bytes") or 1.0
+        output_path = tmp_path / "final.mp3"
 
-        with patch("docu_studio.shorts.shorts_tts_synthesis.trim_and_join") as mock_join:
+        with patch("docu_studio.shorts.shorts_tts_synthesis.concat_audio") as mock_concat, \
+             patch("docu_studio.shorts.shorts_tts_synthesis.trim_and_join") as mock_trim_and_join:
             synthesize_sentences_sequential(
-                tts, ["Only one."], tmp_path, str(tmp_path / "final.mp3"), _PARAMS,
+                tts, ["Only one."], tmp_path, str(output_path),
             )
 
         assert tts.synthesize.call_count == 1
-        mock_join.assert_called_once()
+        mock_concat.assert_not_called()
+        mock_trim_and_join.assert_not_called()
+        # bytes are copied through verbatim -- no ffmpeg re-encode touched them
+        assert output_path.read_bytes() == b"only-sentence-bytes"
 
 
 class TestSynthesizeSentencesConcurrent:

@@ -34,14 +34,6 @@ from docu_studio.shorts.shorts_tts_synthesis import (
 )
 from docu_studio.common.tts_calibration import record_measurement
 
-# gTTS-calibrated silence-trim parameters (Task 2, verified via real-audio
-# silencedetect), reused here to join per-sentence gTTS clips back together
-# — each sentence file IS gTTS output at this join layer, so the same
-# real-audio-measured values apply.
-_GTTS_JOIN_PARAMS = SilenceTrimParams(
-    threshold_db="-45dB", pad_seconds=0.08, min_nonsilent_seconds=0.02, window_seconds=0.02,
-)
-
 # PLACEHOLDER — NOT yet calibrated against real ElevenLabs audio. Reusing
 # gTTS's measured values as a structurally-reasonable starting point only; a
 # real silencedetect calibration pass (same methodology as Task 2) against
@@ -268,7 +260,7 @@ class ShortsRunner(threading.Thread):
                 _DEEPGRAM_JOIN_PARAMS, max_concurrency=_DEEPGRAM_MAX_CONCURRENCY,
             )
         else:
-            synthesize_sentences_sequential(self.tts, sentences, work_dir, audio_path, _GTTS_JOIN_PARAMS)
+            synthesize_sentences_sequential(self.tts, sentences, work_dir, audio_path)
 
     def _cancelled(self) -> bool:
         if self.cancel_event.is_set():
