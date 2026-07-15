@@ -17,7 +17,11 @@ from docu_studio.common.resilient_download import (
 from docu_studio.pipeline.events import LogEvent, LogLevel, ProgressEvent
 from docu_studio.pipeline.stages.footage_assembly import download_clip
 from docu_studio.shorts.capability_resolvers import WordTiming, resolve_beat_grid
-from docu_studio.shorts.shorts_config import SHORTS_HEIGHT, SHORTS_WIDTH
+from docu_studio.shorts.shorts_config import (
+    SHORTS_DEFAULT_MUSIC_VOLUME_DB,
+    SHORTS_HEIGHT,
+    SHORTS_WIDTH,
+)
 from docu_studio.shorts.shorts_cuts import (
     MAX_SEGMENT_DURATION,
     MIN_SEGMENT_DURATION,
@@ -485,6 +489,7 @@ def assemble_short(
     event_queue: queue.Queue,
     captions_enabled: bool = True,
     music_enabled: bool = True,
+    music_volume_db: float = SHORTS_DEFAULT_MUSIC_VOLUME_DB,
     music_provider: str = "local",
     jamendo_client_id: str = "",
     beat_sync_enabled: bool = True,
@@ -689,7 +694,7 @@ def assemble_short(
     if music_path:
         try:
             mixed_audio = str(scene_dir / "audio_mixed.m4a")
-            ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio)
+            ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio, music_volume_db)
             audio_for_mux = mixed_audio
             event_queue.put(LogEvent(
                 message=f"Music bed mixed in ({track_label}, provider={music_provider}, "

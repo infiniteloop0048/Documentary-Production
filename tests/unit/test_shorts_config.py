@@ -7,9 +7,12 @@ from docu_studio.shorts.shorts_config import (
     SHORTS_ASPECT_DIMENSIONS,
     SHORTS_DEFAULT_ASPECT,
     SHORTS_DEFAULT_DURATION,
+    SHORTS_DEFAULT_MUSIC_VOLUME_DB,
     SHORTS_HEIGHT,
     SHORTS_MAX_DURATION,
     SHORTS_MIN_DURATION,
+    SHORTS_MUSIC_VOLUME_MAX_DB,
+    SHORTS_MUSIC_VOLUME_MIN_DB,
     SHORTS_WIDTH,
     ShortsConfig,
 )
@@ -75,3 +78,23 @@ class TestShortsAspectRatio:
 
     def test_default_aspect_dimensions_match_legacy_constants(self) -> None:
         assert SHORTS_ASPECT_DIMENSIONS[SHORTS_DEFAULT_ASPECT] == (SHORTS_WIDTH, SHORTS_HEIGHT)
+
+
+class TestShortsMusicVolume:
+    def test_default_matches_ducking_module_baseline(self) -> None:
+        from docu_studio.common.audio_ducking import MUSIC_BASELINE_DB
+
+        cfg = ShortsConfig(topic="x")
+        assert cfg.music_volume_db == SHORTS_DEFAULT_MUSIC_VOLUME_DB == MUSIC_BASELINE_DB
+
+    def test_accepts_min_and_max_bounds(self) -> None:
+        ShortsConfig(topic="x", music_volume_db=SHORTS_MUSIC_VOLUME_MIN_DB)
+        ShortsConfig(topic="x", music_volume_db=SHORTS_MUSIC_VOLUME_MAX_DB)
+
+    def test_rejects_below_minimum(self) -> None:
+        with pytest.raises(ValueError, match="music_volume_db"):
+            ShortsConfig(topic="x", music_volume_db=SHORTS_MUSIC_VOLUME_MIN_DB - 1)
+
+    def test_rejects_above_maximum(self) -> None:
+        with pytest.raises(ValueError, match="music_volume_db"):
+            ShortsConfig(topic="x", music_volume_db=SHORTS_MUSIC_VOLUME_MAX_DB + 1)

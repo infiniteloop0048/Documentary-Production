@@ -298,6 +298,16 @@
           <input id="music-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
         </div>
 
+        <!-- Music volume (short/reel) -->
+        <div id="music-volume-row" class="mt-4" style="display:none">
+          <label class="text-sm font-medium text-dim block">Music volume</label>
+          <div class="mt-2 flex items-center gap-4">
+            <input id="music-volume-slider" type="range" min="-40" max="0" step="1" value="-20"
+              class="flex-1 accent-accent">
+            <span id="music-volume-label" class="text-sm font-semibold text-accent w-16">-20 dB</span>
+          </div>
+        </div>
+
         <!-- Advanced toggles (short/reel) -->
         <details id="advanced-row" class="mt-4" style="display:none">
           <summary class="text-sm font-medium text-dim cursor-pointer select-none">Advanced</summary>

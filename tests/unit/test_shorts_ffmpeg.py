@@ -268,6 +268,26 @@ class TestMixMusicBed:
         assert "[aout]" in args
         assert "/mixed.m4a" in args
 
+    def test_omitted_volume_defaults_to_ducking_module_baseline(self, wrapper: ShortsFFmpeg) -> None:
+        from docu_studio.common.audio_ducking import MUSIC_BASELINE_DB
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.mix_music_bed("/voice.mp3", "/music.mp3", 30.0, "/mixed.m4a")
+        filter_complex = mock_run.call_args[0][0][
+            mock_run.call_args[0][0].index("-filter_complex") + 1
+        ]
+        assert f"volume={MUSIC_BASELINE_DB}dB" in filter_complex
+
+    def test_custom_volume_is_passed_through_to_filtergraph(self, wrapper: ShortsFFmpeg) -> None:
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            wrapper.mix_music_bed("/voice.mp3", "/music.mp3", 30.0, "/mixed.m4a", -8.0)
+        filter_complex = mock_run.call_args[0][0][
+            mock_run.call_args[0][0].index("-filter_complex") + 1
+        ]
+        assert "volume=-8.0dB" in filter_complex
+
 
 class TestApplySpeedRamp:
     def test_uses_setpts_with_the_given_factor(self, wrapper: ShortsFFmpeg) -> None:

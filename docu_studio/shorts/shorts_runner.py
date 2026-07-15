@@ -23,7 +23,7 @@ from docu_studio.output.project_folder import create_project_folder
 from docu_studio.pipeline.events import ErrorEvent, LogEvent, LogLevel, ProgressEvent
 from docu_studio.shorts.capability_resolvers import get_word_timestamps
 from docu_studio.shorts.shorts_assembly import assemble_short
-from docu_studio.shorts.shorts_config import ShortsConfig
+from docu_studio.shorts.shorts_config import SHORTS_DEFAULT_MUSIC_VOLUME_DB, ShortsConfig
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_log import QueueLoggingHandler, ShortsTeeQueue
 from docu_studio.shorts.shorts_script_gen import generate_shorts_script
@@ -85,6 +85,7 @@ class ShortsRunner(threading.Thread):
         output_base: Path,
         captions_enabled: bool = True,
         music_enabled: bool = True,
+        music_volume_db: float = SHORTS_DEFAULT_MUSIC_VOLUME_DB,
         sensitive_keys: list[str] | None = None,
         seed: int | None = None,
         tts_provider: str = "",
@@ -104,6 +105,7 @@ class ShortsRunner(threading.Thread):
             duration_seconds=duration_seconds,
             captions_enabled=captions_enabled,
             music_enabled=music_enabled,
+            music_volume_db=music_volume_db,
             beat_sync_enabled=beat_sync_enabled,
             speed_ramp_enabled=speed_ramp_enabled,
             punch_enabled=punch_enabled,
@@ -217,6 +219,7 @@ class ShortsRunner(threading.Thread):
             event_queue=self.event_queue,
             captions_enabled=self.config.captions_enabled,
             music_enabled=self.config.music_enabled,
+            music_volume_db=self.config.music_volume_db,
             music_provider=self._music_provider,
             jamendo_client_id=self._jamendo_client_id,
             beat_sync_enabled=self.config.beat_sync_enabled,

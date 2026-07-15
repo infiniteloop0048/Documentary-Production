@@ -247,6 +247,7 @@ function startConfig(mode) {
   _q('aspect-row').style.display = mode === 'short' ? '' : 'none';
   _q('captions-row').style.display = mode === 'short' ? '' : 'none';
   _q('music-row').style.display = mode === 'short' ? '' : 'none';
+  _q('music-volume-row').style.display = mode === 'short' ? '' : 'none';
   _q('advanced-row').style.display = mode === 'short' ? '' : 'none';
   _q('slideshow-topic-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-images-row').style.display = mode === 'slideshow' ? '' : 'none';
@@ -624,6 +625,11 @@ function updateShortsDurationHint() {
   _q('shorts-duration-hint').textContent = `Target: ${secs}s ≈ ${words} words of narration`;
 }
 
+function updateMusicVolumeLabel() {
+  const db = parseInt(_q('music-volume-slider').value);
+  _q('music-volume-label').textContent = db + ' dB';
+}
+
 async function startRun() {
   const topic = (_q('topic-input')?.value || '').trim();
   if (_runMode === 'clipstory') {
@@ -695,6 +701,7 @@ async function startRun() {
       aspect_ratio: _q('shorts-aspect-select').value,
       captions_enabled: _q('captions-toggle').checked,
       music_enabled: _q('music-toggle').checked,
+      music_volume_db: parseInt(_q('music-volume-slider').value),
       beat_sync_enabled: _q('beat-sync-toggle').checked,
       speed_ramp_enabled: _q('speed-ramp-toggle').checked,
       punch_enabled: _q('punch-toggle').checked,
@@ -887,6 +894,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (durSec) durSec.addEventListener('input', updateDurationHint);
   const shortsDur = _q('shorts-duration-slider');
   if (shortsDur) shortsDur.addEventListener('input', updateShortsDurationHint);
+  const musicVol = _q('music-volume-slider');
+  if (musicVol) musicVol.addEventListener('input', updateMusicVolumeLabel);
   // Wire cancel button
   _q('cancel-btn').addEventListener('click', cancelRun);
   // Init provider models

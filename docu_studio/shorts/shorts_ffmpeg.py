@@ -468,16 +468,27 @@ class ShortsFFmpeg(FFmpegWrapper):
         self._check(result, f"burn_captions → {output_path!r}")
 
     def mix_music_bed(
-        self, voice_path: str, music_path: str, video_duration: float, output_path: str
+        self,
+        voice_path: str,
+        music_path: str,
+        video_duration: float,
+        output_path: str,
+        music_volume_db: float | None = None,
     ) -> None:
         """Loop/trim *music_path* to *video_duration*, duck it under
         *voice_path* via sidechaincompress, and write the mixed result to
         *output_path* as a standalone audio file — the caller (assemble_short)
         passes this into mux_shorts_audio exactly as it would the raw voice
-        track, so that method's -map discipline never needs to change."""
-        from docu_studio.common.audio_ducking import build_ducking_filtergraph
+        track, so that method's -map discipline never needs to change.
 
-        filter_complex = build_ducking_filtergraph(video_duration)
+        *music_volume_db* defaults to the shared ducking module's baseline
+        (the same value Slideshow/Clipstory use) when not given."""
+        from docu_studio.common.audio_ducking import MUSIC_BASELINE_DB, build_ducking_filtergraph
+
+        filter_complex = build_ducking_filtergraph(
+            video_duration,
+            music_baseline_db=MUSIC_BASELINE_DB if music_volume_db is None else music_volume_db,
+        )
         cmd = [
             self._ffmpeg, "-y",
             "-i", voice_path,

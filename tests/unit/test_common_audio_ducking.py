@@ -52,3 +52,8 @@ class TestBuildDuckingFiltergraph:
     def test_amix_normalize_disabled_so_voice_stays_dominant(self) -> None:
         graph = build_ducking_filtergraph(10.0)
         assert "amix=inputs=2:duration=first:normalize=0[aout]" in graph
+
+    def test_custom_music_baseline_db_overrides_default(self) -> None:
+        graph = build_ducking_filtergraph(30.0, music_baseline_db=-10)
+        assert "volume=-10dB" in graph
+        assert "volume=-20dB" not in graph

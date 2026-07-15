@@ -250,6 +250,7 @@ class Bridge:
             from docu_studio.adapters.footage.factory import build_footage_providers
             from docu_studio.adapters.llm.factory import build_llm
             from docu_studio.adapters.tts.factory import build_tts
+            from docu_studio.shorts.shorts_config import SHORTS_DEFAULT_MUSIC_VOLUME_DB
             from docu_studio.shorts.shorts_runner import ShortsRunner
 
             s = self._settings
@@ -299,6 +300,7 @@ class Bridge:
             aspect_ratio = config.get("aspect_ratio", "9:16")
             captions_enabled = bool(config.get("captions_enabled", True))
             music_enabled = bool(config.get("music_enabled", True))
+            music_volume_db = float(config.get("music_volume_db", SHORTS_DEFAULT_MUSIC_VOLUME_DB))
             beat_sync_enabled = bool(config.get("beat_sync_enabled", True))
             speed_ramp_enabled = bool(config.get("speed_ramp_enabled", True))
             punch_enabled = bool(config.get("punch_enabled", True))
@@ -315,6 +317,7 @@ class Bridge:
                 output_base=output_base,
                 captions_enabled=captions_enabled,
                 music_enabled=music_enabled,
+                music_volume_db=music_volume_db,
                 sensitive_keys=[
                     v for v in [llm_key, tts_key, pexels_key, pixabay_key, coverr_key,
                                 jamendo_client_id] if v

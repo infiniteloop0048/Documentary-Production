@@ -8,11 +8,13 @@ from __future__ import annotations
 
 _FADE_SECONDS = 1.0
 # Combined with sidechaincompress ducking below, lands music around -18 to
-# -22 dB under narration — voice always dominant.
-_MUSIC_BASELINE_DB = -20
+# -22 dB under narration — voice always dominant. Exported (no leading
+# underscore) so callers that expose this as a user-facing setting (e.g.
+# Shorts' music volume control) can default to the exact value used here.
+MUSIC_BASELINE_DB = -20
 
 
-def build_ducking_filtergraph(video_duration: float) -> str:
+def build_ducking_filtergraph(video_duration: float, music_baseline_db: float = MUSIC_BASELINE_DB) -> str:
     """Return a -filter_complex string that loops/trims a music input ([1:a])
     to *video_duration* seconds, fades it in/out, ducks it under a voice
     input ([0:a]) via sidechaincompress, and mixes the two with amix
@@ -27,7 +29,7 @@ def build_ducking_filtergraph(video_duration: float) -> str:
         f"[1:a]atrim=0:{video_duration:.3f},"
         f"afade=t=in:st=0:d={_FADE_SECONDS:.2f},"
         f"afade=t=out:st={fade_out_start:.3f}:d={_FADE_SECONDS:.2f},"
-        f"volume={_MUSIC_BASELINE_DB}dB[music_faded];"
+        f"volume={music_baseline_db}dB[music_faded];"
         f"[music_faded][0:a]sidechaincompress=threshold=0.05:ratio=8:attack=5:release=300[music_ducked];"
         f"[0:a][music_ducked]amix=inputs=2:duration=first:normalize=0[aout]"
     )
