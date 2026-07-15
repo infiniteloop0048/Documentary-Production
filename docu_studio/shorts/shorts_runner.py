@@ -42,16 +42,29 @@ _GTTS_JOIN_PARAMS = SilenceTrimParams(
     threshold_db="-45dB", pad_seconds=0.08, min_nonsilent_seconds=0.02, window_seconds=0.02,
 )
 
-# PLACEHOLDER — NOT yet calibrated against real ElevenLabs/Deepgram audio.
-# Reusing gTTS's measured values as a structurally-reasonable starting point
-# only; a real silencedetect calibration pass (same methodology as Task 2)
-# against each provider's own real output is required before these can be
-# trusted, and is blocked pending real API keys for both providers.
+# PLACEHOLDER — NOT yet calibrated against real ElevenLabs audio. Reusing
+# gTTS's measured values as a structurally-reasonable starting point only; a
+# real silencedetect calibration pass (same methodology as Task 2) against
+# ElevenLabs' own real output is required before these can be trusted, and
+# is blocked pending a real ElevenLabs API key.
 _ELEVENLABS_JOIN_PARAMS = SilenceTrimParams(
     threshold_db="-45dB", pad_seconds=0.08, min_nonsilent_seconds=0.02, window_seconds=0.02,
 )
+
+# Deepgram-calibrated (Task 4 Phase 2 checkpoint, real silencedetect against
+# 5 real Deepgram TTS outputs of varying length and ending phoneme, incl. a
+# soft-consonant/fricative ending — "...need constant warmth."). -45dB
+# (gTTS's value) does NOT transfer: unlike gTTS's clean digital silence,
+# Deepgram's raw output carries residual decay/noise energy above -45dB near
+# clip tails on longer sentences, which made silencedetect fail to find the
+# true trailing-silence run at all on 2 of 5 samples (aura-asteria-en voice).
+# -40dB reliably found genuine leading/trailing silence on all 5. Measured
+# natural silence at -40dB ranged ~0.02s-0.22s across samples; 0.08s pad
+# sits inside that range and was verified not to clip the soft-consonant
+# sample's decay tail (RMS envelope fades gradually into the trim point,
+# no abrupt cut).
 _DEEPGRAM_JOIN_PARAMS = SilenceTrimParams(
-    threshold_db="-45dB", pad_seconds=0.08, min_nonsilent_seconds=0.02, window_seconds=0.02,
+    threshold_db="-40dB", pad_seconds=0.08, min_nonsilent_seconds=0.02, window_seconds=0.02,
 )
 
 # ElevenLabs: cap-1 (sequential) — its free tier's own concurrency ceiling is
