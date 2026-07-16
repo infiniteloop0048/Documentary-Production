@@ -172,6 +172,11 @@ class ShortsRunner(threading.Thread):
                     f"{len(script.sentences)} sentences)",
             level=LogLevel.INFO,
         ))
+        if not script.sentences:
+            raise RuntimeError(
+                "Script generation returned no sentences — the LLM produced an empty "
+                "script. Check the configured LLM model/provider and try again."
+            )
         if self._cancelled():
             return
 

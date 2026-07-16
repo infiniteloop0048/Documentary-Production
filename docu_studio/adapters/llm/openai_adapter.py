@@ -47,8 +47,10 @@ class _OpenAICompatBase(LLMProvider):
     ) -> str:
         def _generate_chunk(script_so_far: str, words_needed: int) -> str:
             # ~1.4 tokens/word for English prose, plus a buffer so max_tokens itself
-            # never truncates a chunk before the model finishes it.
-            max_tokens = min(8192, max(1024, int(words_needed * 1.6) + 256))
+            # never truncates a chunk before the model finishes it. The extra buffer
+            # also covers reasoning models (e.g. DeepSeek) that spend part of the
+            # completion budget on hidden reasoning tokens before visible content.
+            max_tokens = min(8192, max(1536, int(words_needed * 1.6) + 1024))
             if not script_so_far:
                 prompt = (
                     f"Write a documentary narration script about '{topic}'. "
@@ -70,7 +72,17 @@ class _OpenAICompatBase(LLMProvider):
                     max_tokens=max_tokens,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                return resp.choices[0].message.content or ""
+                content = resp.choices[0].message.content
+                if not content:
+                    # A 200 response with empty content happens with reasoning models
+                    # that exhaust max_tokens on hidden reasoning before writing any
+                    # visible text — treat it as a failure so _with_retry retries it
+                    # instead of silently producing an empty script chunk.
+                    finish_reason = resp.choices[0].finish_reason
+                    raise RuntimeError(
+                        f"LLM returned empty completion (finish_reason={finish_reason})"
+                    )
+                return content
             return _with_retry(_call)
 
         script = self._generate_script_in_chunks(
