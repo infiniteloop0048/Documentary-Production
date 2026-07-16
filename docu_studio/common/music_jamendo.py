@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +38,12 @@ _REQUEST_TIMEOUT = 10.0
 # Upper bound on the duration between range sent to Jamendo — generous enough
 # that "at least the target duration" never excludes a normal full-length track.
 _MAX_TRACK_DURATION = 1200
+# Jamendo's API intermittently drops connections ("Connection reset by peer")
+# with no server-side fault — observed ~1 in 3 requests. A request-level retry
+# absorbs that instead of the whole music bed silently disappearing on one
+# unlucky call.
+_MAX_RETRIES = 3
+_RETRY_DELAY = 1.5
 
 
 def music_cache_dir() -> Path:
@@ -80,12 +87,23 @@ class JamendoMusicProvider:
             "vocalinstrumental": "instrumental",
             "audioformat": "mp31",
         }
-        try:
-            response = requests.get(JAMENDO_API_URL, params=params, timeout=self._timeout)
-            response.raise_for_status()
-            data = response.json()
-        except Exception as exc:
-            _log.warning("Jamendo: search request failed (%s)", exc)
+        data = None
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                response = requests.get(JAMENDO_API_URL, params=params, timeout=self._timeout)
+                response.raise_for_status()
+                data = response.json()
+                break
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRIES - 1:
+                    time.sleep(_RETRY_DELAY)
+        if data is None:
+            _log.warning(
+                "Jamendo: search request failed after %d attempts (%s)",
+                _MAX_RETRIES, last_exc,
+            )
             return []
 
         raw_results = data.get("results", [])
@@ -123,8 +141,18 @@ class JamendoMusicProvider:
         if dest.exists():
             _log.info("Jamendo: cache hit for %r", candidate.title)
             return str(dest)
-        response = requests.get(candidate.download_url, timeout=self._timeout)
-        response.raise_for_status()
-        dest.write_bytes(response.content)
-        _log.info("Jamendo: downloaded %r -> %s", candidate.title, dest)
-        return str(dest)
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                response = requests.get(candidate.download_url, timeout=self._timeout)
+                response.raise_for_status()
+                dest.write_bytes(response.content)
+                _log.info("Jamendo: downloaded %r -> %s", candidate.title, dest)
+                return str(dest)
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRIES - 1:
+                    time.sleep(_RETRY_DELAY)
+        raise RuntimeError(
+            f"Jamendo: download of {candidate.title!r} failed after {_MAX_RETRIES} attempts"
+        ) from last_exc

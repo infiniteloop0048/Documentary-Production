@@ -36,13 +36,15 @@ def warm_cache() -> None:
 
 
 def get(username: str) -> str:
-    """Return cached value. Falls back to live keyring if warm-up not done."""
-    if _loaded.is_set():
-        return _cache.get(username, "")
-    try:
-        return keyring.get_password(_KEYRING_SERVICE, username) or ""
-    except Exception:
-        return ""
+    """Return cached value, waiting for the warm-up pass if it's still running
+    instead of each caller making its own redundant live keyring round-trip
+    (a single get_settings() call can check up to 11 keys)."""
+    if not _loaded.is_set() and not _loaded.wait(timeout=5.0):
+        try:
+            return keyring.get_password(_KEYRING_SERVICE, username) or ""
+        except Exception:
+            return ""
+    return _cache.get(username, "")
 
 
 def set_key(username: str, value: str) -> None:

@@ -132,10 +132,17 @@ class ShortsRunner(threading.Thread):
 
     def run(self) -> None:
         shorts_logger = logging.getLogger("docu_studio.shorts")
+        # docu_studio.common.music_jamendo isn't a child of docu_studio.shorts,
+        # so its own logger needs the handler too or Jamendo failure reasons
+        # (search/download errors, zero results) never reach the GUI log.
+        jamendo_logger = logging.getLogger("docu_studio.common.music_jamendo")
         handler = QueueLoggingHandler(self.event_queue)
         prev_level = shorts_logger.level
+        prev_jamendo_level = jamendo_logger.level
         shorts_logger.addHandler(handler)
         shorts_logger.setLevel(logging.INFO)
+        jamendo_logger.addHandler(handler)
+        jamendo_logger.setLevel(logging.INFO)
         try:
             self._execute()
         except Exception as exc:
@@ -144,6 +151,8 @@ class ShortsRunner(threading.Thread):
         finally:
             shorts_logger.removeHandler(handler)
             shorts_logger.setLevel(prev_level)
+            jamendo_logger.removeHandler(handler)
+            jamendo_logger.setLevel(prev_jamendo_level)
             self._save_history()
             self.event_queue.close_log()  # flush log before sentinel
             self.event_queue.put(None)
