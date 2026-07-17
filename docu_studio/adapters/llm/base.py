@@ -23,8 +23,13 @@ _MAX_CHUNK_BUDGET = 20
 # If a single chunk contributes less than this fraction of the target (or this many
 # words, whichever is larger) while still short of target, the model has plateaued —
 # further chunks are unlikely to help, so stop instead of burning the whole budget.
+# The fixed floor is capped at a fraction of the target itself (see min_contribution
+# below) — otherwise short targets (Shorts scripts are 70-190 words) are smaller than
+# the floor, so any first-chunk undershoot looks like a "plateau" and generation gives
+# up after a single try instead of asking for the small remaining shortfall.
 _DIMINISHING_RETURNS_RATIO = 0.05
 _DIMINISHING_RETURNS_MIN_WORDS = 150
+_DIMINISHING_RETURNS_MIN_WORDS_TARGET_FRACTION = 0.5
 
 
 def _chunk_budget(target_words: int) -> int:
@@ -82,7 +87,11 @@ class LLMProvider(ABC):
                 continue  # close enough — the top-of-loop check ends things cleanly
 
             min_contribution = max(
-                target_words * _DIMINISHING_RETURNS_RATIO, _DIMINISHING_RETURNS_MIN_WORDS
+                target_words * _DIMINISHING_RETURNS_RATIO,
+                min(
+                    _DIMINISHING_RETURNS_MIN_WORDS,
+                    target_words * _DIMINISHING_RETURNS_MIN_WORDS_TARGET_FRACTION,
+                ),
             )
             if chunk_words < min_contribution:
                 if on_diminishing_returns is not None:

@@ -34,15 +34,18 @@ class AnthropicAdapter(LLMProvider):
             if not script_so_far:
                 prompt = (
                     f"Write a documentary narration script about '{topic}'. "
-                    f"Target length: {target_words} words. "
-                    "Write only the script, no headings or commentary."
+                    f"Target length: {target_words} words — stay within "
+                    f"{target_words} to {int(target_words * 1.1)} words, do not go "
+                    "meaningfully under or over. Write only the script, no headings "
+                    "or commentary."
                 )
             else:
                 prompt = (
                     f"Continue the documentary narration script below about '{topic}'. "
-                    f"Write approximately {words_needed} more words to reach the "
-                    f"{target_words}-word target. Continue directly from where it left "
-                    "off — do not repeat prior content, do not add headings or "
+                    f"Write {words_needed} more words to reach the {target_words}-word "
+                    "target — stay close to this amount, do not go meaningfully under "
+                    "or over. Continue directly from where it left off — do not repeat "
+                    f"prior content, do not add headings or "
                     f"commentary.\n\n--- Script so far ---\n{script_so_far}"
                 )
             msg = self._client.messages.create(

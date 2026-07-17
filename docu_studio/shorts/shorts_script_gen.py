@@ -53,7 +53,8 @@ _SCRIPT_INSTRUCTIONS_TEMPLATE = (
     "- Write numbers the way they should be SPOKEN, e.g. 'ninety percent' not '90%', "
     "'three point five million' not '3.5 million'.\n"
     "- Short sentences. Use punctuation for spoken pacing.\n"
-    "- Target length: approximately {target_words} words.\n\n"
+    "- Target length: {target_words} to {target_words_max} words — stay within this "
+    "range, do not go meaningfully under or over.\n\n"
     "Write only the narration text — nothing else."
 )
 
@@ -90,6 +91,31 @@ class ShortsScript:
 
 def _fallback_queries(topic: str, count: int) -> list[str]:
     return [topic] * count
+
+
+# LLM word-count instructions are advisory, not enforced — reasoning models in
+# particular have been observed overshooting a small target by 2x+ even with
+# bounded-range wording. Shorts duration is driven directly by narration word
+# count downstream (TTS audio length -> footage assembly), so an unchecked
+# overshoot silently produces a much longer video than requested. Trim as a
+# hard safety net rather than relying on prompt compliance alone.
+_OVERSHOOT_TRIM_THRESHOLD = 1.15
+
+
+def _trim_to_word_budget(text: str, target_words: int) -> str:
+    """Trim *text* to approximately *target_words*, cutting only at sentence
+    boundaries so the result stays well-formed for TTS."""
+    sentences = split_sentences(text)
+    if not sentences:
+        return text
+    kept: list[str] = []
+    words_so_far = 0
+    for sentence in sentences:
+        kept.append(sentence)
+        words_so_far += len(sentence.split())
+        if words_so_far >= target_words:
+            break
+    return " ".join(kept)
 
 
 def _fetch_scene_json(llm: LLMProvider, script: str) -> list[dict] | None:
@@ -173,8 +199,22 @@ def generate_shorts_script(
         "Shorts word target: %d words for %ds at %.1f WPM (provider=%s voice=%s)",
         target_words, duration_seconds, wpm, tts_provider or "?", tts_voice or "?",
     )
-    prompt = _SCRIPT_INSTRUCTIONS_TEMPLATE.format(topic=topic, target_words=target_words)
+    prompt = _SCRIPT_INSTRUCTIONS_TEMPLATE.format(
+        topic=topic, target_words=target_words,
+        target_words_max=int(target_words * _OVERSHOOT_TRIM_THRESHOLD),
+    )
     text = llm.generate_script(topic=prompt, target_words=target_words).strip()
+
+    actual_words = len(text.split())
+    if actual_words > target_words * _OVERSHOOT_TRIM_THRESHOLD:
+        trimmed = _trim_to_word_budget(text, target_words)
+        _log.warning(
+            "Shorts script overshot word target (%d words for a %d-word target, "
+            "%.0f%%) — trimmed to %d words to keep video duration close to requested.",
+            actual_words, target_words, 100 * actual_words / target_words,
+            len(trimmed.split()),
+        )
+        text = trimmed
 
     sentences = split_sentences(text)
     if not sentences:
