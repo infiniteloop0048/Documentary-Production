@@ -543,7 +543,7 @@ def assemble_short(
         try:
             resolved = resolve_music_track(
                 music_provider,
-                mood=script.music_mood,
+                moods=list(script.music_moods),
                 max_duration=audio_duration,
                 jamendo_client_id=jamendo_client_id,
                 seed=seed,
@@ -551,7 +551,7 @@ def assemble_short(
             if resolved is None:
                 event_queue.put(LogEvent(
                     message="No usable music track found — skipping music bed.",
-                    level=LogLevel.INFO,
+                    level=LogLevel.WARNING,
                 ))
             else:
                 music_path, track_label, track_bpm = resolved
@@ -698,7 +698,7 @@ def assemble_short(
             audio_for_mux = mixed_audio
             event_queue.put(LogEvent(
                 message=f"Music bed mixed in ({track_label}, provider={music_provider}, "
-                        f"mood={script.music_mood}).",
+                        f"moods={list(script.music_moods)}).",
                 level=LogLevel.INFO,
             ))
         except Exception as exc:

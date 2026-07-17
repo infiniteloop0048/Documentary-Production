@@ -2,8 +2,45 @@
 from __future__ import annotations
 
 import math
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_TRAILING_PUNCT_RE = re.compile(r"[.!?]+$")
+_TERMINAL_PUNCT_RE = re.compile(r"[.!?]$")
+
+
+def _normalize_sentence(sentence: str) -> str:
+    return _TRAILING_PUNCT_RE.sub("", sentence.strip().lower())
+
+
+def _strip_leading_duplicate_sentence(prior_text: str, chunk: str) -> str:
+    """Drop *chunk*'s first sentence if it restates *prior_text*'s last sentence.
+
+    Continuation prompts instruct the model not to repeat prior content, but this
+    isn't reliably obeyed (observed with reasoning models like DeepSeek) — the model
+    sometimes opens the new chunk by restating the sentence it just ended on before
+    continuing with new content, producing a back-to-back duplicate sentence in the
+    final script.
+
+    Both the candidate "last sentence" and "first sentence" must end with actual
+    terminal punctuation before comparing — otherwise an unpunctuated chunk (a run
+    of raw words with no sentence boundary at all) would be treated as a single
+    giant "sentence" and could be misdetected as a duplicate of unrelated content.
+    """
+    prior_sentences = _SENTENCE_SPLIT_RE.split(prior_text.strip())
+    chunk_sentences = _SENTENCE_SPLIT_RE.split(chunk.strip())
+    if not prior_sentences or not chunk_sentences:
+        return chunk
+    last_prior = prior_sentences[-1].strip()
+    first_chunk = chunk_sentences[0].strip()
+    if not (_TERMINAL_PUNCT_RE.search(last_prior) and _TERMINAL_PUNCT_RE.search(first_chunk)):
+        return chunk
+    if _normalize_sentence(last_prior) != _normalize_sentence(first_chunk):
+        return chunk
+    return " ".join(chunk_sentences[1:])
+
 
 # Single-call completions reliably undershoot a requested word count (models tend to
 # stop well short of a target length even when max_tokens allows more), so long scripts
@@ -79,6 +116,10 @@ class LLMProvider(ABC):
             chunk = generate_chunk(script, words_needed).strip()
             if not chunk:
                 break
+            if script:
+                chunk = _strip_leading_duplicate_sentence(script, chunk)
+                if not chunk:
+                    break
             chunk_words = len(chunk.split())
             script = f"{script}\n\n{chunk}" if script else chunk
 

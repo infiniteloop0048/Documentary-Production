@@ -85,6 +85,16 @@ class TestJamendoSearch:
         assert params["client_id"] == "fake-client-id"
         assert params["tags"] == "epic"
 
+    def test_empty_query_omits_tags_filter_from_params(self) -> None:
+        provider = JamendoMusicProvider(client_id="fake-client-id")
+        with patch("docu_studio.common.music_jamendo.requests.get") as mock_get:
+            mock_get.return_value = MagicMock(status_code=200, json=lambda: _JAMENDO_PAYLOAD)
+            candidates = provider.search("", max_duration=20.0)
+
+        params = mock_get.call_args.kwargs["params"]
+        assert "tags" not in params
+        assert len(candidates) == 2
+
     def test_network_error_returns_empty_list(self) -> None:
         provider = JamendoMusicProvider(client_id="fake-client-id")
         with patch(

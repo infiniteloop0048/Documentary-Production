@@ -139,15 +139,31 @@ class TestGenerateShortsScript:
 
 
 class TestMusicMoodField:
-    def test_parses_music_mood_from_first_entry(self) -> None:
+    def test_parses_music_moods_from_first_entry(self) -> None:
         llm = MagicMock()
         llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
         llm.break_into_scenes.return_value = [
-            {"title": "aerial city night", "narration": "Fact one is huge.", "music_mood": "epic"},
+            {
+                "title": "aerial city night", "narration": "Fact one is huge.",
+                "music_moods": ["epic", "cinematic", "dramatic"],
+            },
             {"title": "close-up hands typing", "narration": "Fact two is bigger."},
         ]
         result = generate_shorts_script("Cities at night", 30, llm)
-        assert result.music_mood == "epic"
+        assert result.music_moods == ("epic", "cinematic", "dramatic")
+
+    def test_caps_at_3_tags_and_dedupes(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
+        llm.break_into_scenes.return_value = [
+            {
+                "title": "aerial city night", "narration": "Fact one is huge.",
+                "music_moods": ["epic", "epic", "cinematic", "dramatic", "upbeat"],
+            },
+            {"title": "close-up hands typing", "narration": "Fact two is bigger."},
+        ]
+        result = generate_shorts_script("Cities at night", 30, llm)
+        assert result.music_moods == ("epic", "cinematic", "dramatic")
 
     def test_defaults_to_cinematic_when_field_absent(self) -> None:
         llm = MagicMock()
@@ -157,24 +173,27 @@ class TestMusicMoodField:
             {"title": "close-up hands typing", "narration": "Fact two is bigger."},
         ]
         result = generate_shorts_script("Cities at night", 30, llm)
-        assert result.music_mood == "cinematic"
+        assert result.music_moods == ("cinematic",)
 
-    def test_defaults_to_cinematic_when_mood_is_multi_word(self) -> None:
+    def test_skips_multi_word_tags_but_keeps_valid_ones(self) -> None:
         llm = MagicMock()
         llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
         llm.break_into_scenes.return_value = [
-            {"title": "aerial city night", "narration": "Fact one is huge.", "music_mood": "very epic indeed"},
+            {
+                "title": "aerial city night", "narration": "Fact one is huge.",
+                "music_moods": ["very epic indeed", "calm", "not a single word either"],
+            },
             {"title": "close-up hands typing", "narration": "Fact two is bigger."},
         ]
         result = generate_shorts_script("Cities at night", 30, llm)
-        assert result.music_mood == "cinematic"
+        assert result.music_moods == ("calm",)
 
     def test_defaults_to_cinematic_when_extraction_fails_entirely(self) -> None:
         llm = MagicMock()
         llm.generate_script.return_value = "One sentence. Two sentence."
         llm.break_into_scenes.side_effect = RuntimeError("model returned invalid JSON")
         result = generate_shorts_script("Space facts", 30, llm)
-        assert result.music_mood == "cinematic"
+        assert result.music_moods == ("cinematic",)
 
     def test_mood_extraction_does_not_add_extra_llm_calls(self) -> None:
         llm = MagicMock()

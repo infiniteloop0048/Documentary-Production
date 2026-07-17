@@ -75,6 +75,10 @@ class JamendoMusicProvider:
         self._timeout = timeout
 
     def search(self, query: str, max_duration: float) -> list[TrackCandidate]:
+        """Search Jamendo for instrumental tracks tagged *query*. An empty/falsy
+        *query* omits the tags filter entirely, searching the whole catalog —
+        used as a last-resort "guaranteed to return something" broad fallback
+        when every specific mood tag comes up empty."""
         if not self._client_id:
             _log.warning("Jamendo: no client_id configured — skipping search")
             return []
@@ -82,11 +86,12 @@ class JamendoMusicProvider:
             "client_id": self._client_id,
             "format": "json",
             "limit": 10,
-            "tags": query,
             "durationbetween": f"{max(1, int(max_duration))}_{_MAX_TRACK_DURATION}",
             "vocalinstrumental": "instrumental",
             "audioformat": "mp31",
         }
+        if query:
+            params["tags"] = query
         data = None
         last_exc: Exception | None = None
         for attempt in range(_MAX_RETRIES):
@@ -126,12 +131,13 @@ class JamendoMusicProvider:
                 ))
             except (KeyError, TypeError, ValueError):
                 continue
+        query_label = query or "(none — broad fallback)"
         _log.info(
             "Jamendo: query %r returned %d raw candidates, %d with a usable download URL",
-            query, len(raw_results), len(candidates),
+            query_label, len(raw_results), len(candidates),
         )
         if not candidates:
-            _log.info("Jamendo: zero usable results for query %r", query)
+            _log.info("Jamendo: zero usable results for query %r", query_label)
         return candidates
 
     def fetch(self, candidate: TrackCandidate) -> str:

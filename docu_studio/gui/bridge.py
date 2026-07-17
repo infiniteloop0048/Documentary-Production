@@ -16,6 +16,7 @@ import webview
 
 from docu_studio.config import key_cache
 from docu_studio.config.settings import Settings
+from docu_studio.pipeline.events import LogLevel
 
 if TYPE_CHECKING:
     from docu_studio.clipstory.clipstory_ffmpeg import ClipStoryFFmpeg
@@ -674,13 +675,20 @@ class Bridge:
         if "log" in cname:
             msg = getattr(event, "message", str(event))
             lower = msg.lower()
-            level = "info"
-            if any(w in lower for w in ("error", "fail", "exception")):
+            # Trust the severity the pipeline already computed (LogEvent.level, set
+            # from the real logging.WARNING/ERROR levelno via QueueLoggingHandler)
+            # instead of re-guessing from substrings in the message text — text
+            # matching misclassified recoverable warnings (e.g. a message containing
+            # "failed" that falls back gracefully) as fatal-looking errors.
+            event_level = getattr(event, "level", None)
+            if event_level is LogLevel.ERROR:
                 level = "error"
-            elif "warn" in lower:
+            elif event_level is LogLevel.WARNING:
                 level = "warning"
             elif any(w in lower for w in ("success", "complete", "done", "finished")):
                 level = "success"
+            else:
+                level = "info"
             for kw, idx in stage_map.items():
                 if kw in lower:
                     self._event_q.put({"type": "stage", "index": idx, "state": "active"})

@@ -1,7 +1,11 @@
 """Unit tests for LLMProvider._chunk_budget and _generate_script_in_chunks."""
 from __future__ import annotations
 
-from docu_studio.adapters.llm.base import LLMProvider, _chunk_budget
+from docu_studio.adapters.llm.base import (
+    LLMProvider,
+    _chunk_budget,
+    _strip_leading_duplicate_sentence,
+)
 
 
 class TestChunkBudget:
@@ -52,3 +56,51 @@ class TestGenerateScriptInChunksDiminishingReturns:
 
         assert not triggered, "should not treat steady meaningful progress as diminishing returns"
         assert len(script.split()) >= 4500 * 0.9
+
+    def test_drops_continuation_chunk_that_restates_last_sentence(self) -> None:
+        # Reproduces the observed DeepSeek behavior: continuation chunk opens by
+        # repeating the exact sentence the prior chunk ended on, despite the
+        # prompt instructing it not to repeat prior content. Filler word counts
+        # are sized to clear the diminishing-returns floor for target=60, so the
+        # loop calls generate_chunk twice rather than giving up after one.
+        calls = []
+        first_chunk = ("Word " * 30).strip() + ". The falls are disappearing."
+        second_chunk_raw = "The falls are disappearing. Each foot brings the end closer today."
+
+        def generate_chunk(script_so_far: str, words_needed: int) -> str:
+            calls.append(script_so_far)
+            return first_chunk if not script_so_far else second_chunk_raw
+
+        script = LLMProvider._generate_script_in_chunks(60, generate_chunk)
+
+        assert len(calls) == 2
+        assert script.count("The falls are disappearing.") == 1
+        assert script.endswith("Each foot brings the end closer today.")
+
+
+class TestStripLeadingDuplicateSentence:
+    def test_strips_exact_restated_sentence(self) -> None:
+        result = _strip_leading_duplicate_sentence(
+            "Foo bar. The falls are disappearing.",
+            "The falls are disappearing. Each foot brings the end closer.",
+        )
+        assert result == "Each foot brings the end closer."
+
+    def test_strips_case_and_punctuation_insensitively(self) -> None:
+        result = _strip_leading_duplicate_sentence(
+            "The Falls Are Disappearing!",
+            "the falls are disappearing. New content here.",
+        )
+        assert result == "New content here."
+
+    def test_leaves_chunk_untouched_when_no_overlap(self) -> None:
+        result = _strip_leading_duplicate_sentence(
+            "First sentence here.", "Second sentence here."
+        )
+        assert result == "Second sentence here."
+
+    def test_returns_empty_when_chunk_is_only_the_duplicate(self) -> None:
+        result = _strip_leading_duplicate_sentence(
+            "The falls are disappearing.", "The falls are disappearing."
+        )
+        assert result == ""

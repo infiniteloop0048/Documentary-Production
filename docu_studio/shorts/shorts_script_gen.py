@@ -68,9 +68,11 @@ _QUERY_OVERRIDE_TEMPLATE = (
     "- 'title' must be a concrete 2-5 word visual search query describing stock "
     "footage that would visually match that sentence (e.g. 'aerial city night', "
     "'close-up hands typing'). No abstract or vague terms.\n"
-    "Additionally, on the FIRST entry only, include a 'music_mood' key: a single "
-    "word describing the ideal background music mood for this whole video (e.g. "
-    "'epic', 'calm', 'upbeat', 'mysterious'). Omit this key on every other entry.\n"
+    "Additionally, on the FIRST entry only, include a 'music_moods' key: an array "
+    "of exactly 3 different single-word background-music mood/genre tags for this "
+    "whole video, ordered from most fitting to least fitting (e.g. [\"epic\", "
+    "\"cinematic\", \"dramatic\"]). Each word should be a term commonly used to tag "
+    "instrumental background music. Omit this key on every other entry.\n"
     "Additionally, on the ONE sentence (if any) that contains the single most "
     "striking stat or phrase, include a 'punch' key: that stat or phrase in 4 "
     "words or fewer (e.g. '90 percent', 'one million years'). Omit this key on "
@@ -85,7 +87,7 @@ class ShortsScript:
     text: str
     sentences: list[str]
     visual_queries: list[str]
-    music_mood: str = DEFAULT_MUSIC_MOOD
+    music_moods: tuple[str, ...] = (DEFAULT_MUSIC_MOOD,)
     punch: tuple[int, str] | None = None
 
 
@@ -145,18 +147,33 @@ def _queries_from_raw(raw: list[dict] | None, sentence_count: int) -> list[str] 
     return queries
 
 
-def _mood_from_raw(raw: list[dict] | None) -> str:
-    """Return the one-word music mood from an already-fetched *raw* response, or
-    the default if absent, malformed, or not a single word."""
+_MUSIC_MOODS_MAX = 3
+
+
+def _moods_from_raw(raw: list[dict] | None) -> tuple[str, ...]:
+    """Return up to 3 valid single-word music mood/genre tags (most-fitting first)
+    from an already-fetched *raw* response, or a single-element default tuple if
+    absent, malformed, or empty after validation. Multiple tags let the caller
+    try Jamendo with fallback tags — a single mood word sometimes has zero
+    matching tracks, silently producing a musicless video."""
     if not raw:
-        return DEFAULT_MUSIC_MOOD
+        return (DEFAULT_MUSIC_MOOD,)
     for item in raw:
         if not isinstance(item, dict):
             continue
-        mood = str(item.get("music_mood", "")).strip().lower()
-        if mood and " " not in mood:
-            return mood
-    return DEFAULT_MUSIC_MOOD
+        raw_moods = item.get("music_moods")
+        if not isinstance(raw_moods, list):
+            continue
+        moods: list[str] = []
+        for candidate in raw_moods:
+            word = str(candidate).strip().lower()
+            if word and " " not in word and word not in moods:
+                moods.append(word)
+            if len(moods) == _MUSIC_MOODS_MAX:
+                break
+        if moods:
+            return tuple(moods)
+    return (DEFAULT_MUSIC_MOOD,)
 
 
 def _punch_from_raw(raw: list[dict] | None) -> tuple[int, str] | None:
@@ -222,14 +239,14 @@ def generate_shorts_script(
 
     raw = _fetch_scene_json(llm, text)
     queries = _queries_from_raw(raw, len(sentences))
-    music_mood = _mood_from_raw(raw)
+    music_moods = _moods_from_raw(raw)
     punch = _punch_from_raw(raw)
     if queries is None:
         _log.info("Shorts visual-query extraction failed, retrying once")
         raw = _fetch_scene_json(llm, text)
         queries = _queries_from_raw(raw, len(sentences))
-        if music_mood == DEFAULT_MUSIC_MOOD:
-            music_mood = _mood_from_raw(raw)
+        if music_moods == (DEFAULT_MUSIC_MOOD,):
+            music_moods = _moods_from_raw(raw)
         if punch is None:
             punch = _punch_from_raw(raw)
     if queries is None:
@@ -244,5 +261,5 @@ def generate_shorts_script(
 
     return ShortsScript(
         text=text, sentences=sentences, visual_queries=queries,
-        music_mood=music_mood, punch=punch,
+        music_moods=music_moods, punch=punch,
     )
