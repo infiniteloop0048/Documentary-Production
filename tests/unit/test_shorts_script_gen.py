@@ -206,75 +206,115 @@ class TestMusicMoodField:
         assert llm.break_into_scenes.call_count == 2
 
 
-class TestPunchField:
-    def test_parses_punch_from_the_matching_sentence(self) -> None:
-        llm = MagicMock()
-        llm.generate_script.return_value = "Fact one is huge. Ninety percent agree. Loop back now."
-        llm.break_into_scenes.return_value = [
-            {"title": "aerial city night", "narration": "Fact one is huge."},
-            {"title": "chart closeup", "narration": "Ninety percent agree.", "punch": "90 PERCENT"},
-            {"title": "sunrise timelapse", "narration": "Loop back now."},
-        ]
-        result = generate_shorts_script("Cities at night", 30, llm)
-        assert result.punch == (1, "90 PERCENT")
-
-    def test_defaults_to_none_when_field_absent(self) -> None:
+class TestGenerateShortsScriptAiImageIndependent:
+    def test_populates_image_prompts_aligned_to_sentences(self) -> None:
         llm = MagicMock()
         llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
         llm.break_into_scenes.return_value = [
-            {"title": "aerial city night", "narration": "Fact one is huge."},
-            {"title": "close-up hands typing", "narration": "Fact two is bigger."},
+            {
+                "title": "aerial city night", "narration": "Fact one is huge.",
+                "image_prompt": "Wide establishing shot of a glittering city skyline at night, cinematic lighting.",
+                "music_moods": ["epic", "cinematic", "dramatic"],
+            },
+            {
+                "title": "close-up hands typing", "narration": "Fact two is bigger.",
+                "image_prompt": "Close-up of hands typing rapidly on a mechanical keyboard, warm desk lamp light.",
+            },
         ]
-        result = generate_shorts_script("Cities at night", 30, llm)
-        assert result.punch is None
 
-    def test_defaults_to_none_when_punch_exceeds_four_words(self) -> None:
+        result = generate_shorts_script(
+            "Cities at night", 30, llm, footage_source="ai_image", story_continuity=False,
+        )
+
+        assert len(result.image_prompts) == 2
+        assert "glittering city skyline" in result.image_prompts[0]
+        assert "hands typing" in result.image_prompts[1]
+        # visual_queries (stock fallback) still populated regardless of mode:
+        assert result.visual_queries == ["aerial city night", "close-up hands typing"]
+
+    def test_does_not_call_style_guide_generation_when_independent(self) -> None:
         llm = MagicMock()
-        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
+        llm.generate_script.return_value = "One sentence. Two sentence."
         llm.break_into_scenes.return_value = [
-            {"title": "aerial city night", "narration": "Fact one is huge.",
-             "punch": "this is way too many words"},
-            {"title": "close-up hands typing", "narration": "Fact two is bigger."},
+            {"title": "a", "narration": "One sentence.", "image_prompt": "prompt one"},
+            {"title": "b", "narration": "Two sentence.", "image_prompt": "prompt two"},
         ]
-        result = generate_shorts_script("Cities at night", 30, llm)
-        assert result.punch is None
 
-    def test_defaults_to_none_when_extraction_fails_entirely(self) -> None:
+        generate_shorts_script("Topic", 30, llm, footage_source="ai_image", story_continuity=False)
+
+        # generate_script called exactly once (for the main narration only —
+        # no extra style-guide call):
+        assert llm.generate_script.call_count == 1
+
+    def test_video_mode_leaves_image_prompts_empty(self) -> None:
         llm = MagicMock()
         llm.generate_script.return_value = "One sentence. Two sentence."
-        llm.break_into_scenes.side_effect = RuntimeError("model returned invalid JSON")
-        result = generate_shorts_script("Space facts", 30, llm)
-        assert result.punch is None
-
-    def test_punch_text_is_uppercased(self) -> None:
-        llm = MagicMock()
-        llm.generate_script.return_value = "Fact one is huge. Fact two is bigger."
         llm.break_into_scenes.return_value = [
-            {"title": "a", "narration": "Fact one is huge.", "punch": "one million years"},
-            {"title": "b", "narration": "Fact two is bigger."},
+            {"title": "a", "narration": "One sentence."},
+            {"title": "b", "narration": "Two sentence."},
         ]
-        result = generate_shorts_script("Cities at night", 30, llm)
-        assert result.punch == (0, "ONE MILLION YEARS")
 
-    def test_punch_extraction_does_not_add_extra_llm_calls(self) -> None:
+        result = generate_shorts_script("Topic", 30, llm, footage_source="video")
+
+        assert result.image_prompts == ()
+
+
+class TestGenerateShortsScriptAiImageStoryContinuity:
+    def test_style_guide_call_happens_before_per_sentence_call(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.side_effect = [
+            "Fact one is huge. Fact two is bigger.",  # main narration call
+            "Cinematic photography style, warm palette. A lone astronaut in a weathered white suit.",  # style-guide call
+        ]
+        llm.break_into_scenes.return_value = [
+            {
+                "title": "astronaut walking", "narration": "Fact one is huge.",
+                "image_prompt": "Cinematic photography, warm palette, lone astronaut in weathered white suit walking on dunes.",
+                "music_moods": ["epic", "cinematic", "dramatic"],
+            },
+            {
+                "title": "astronaut looking up", "narration": "Fact two is bigger.",
+                "image_prompt": "Cinematic photography, warm palette, same astronaut looking up at a huge red planet.",
+            },
+        ]
+
+        result = generate_shorts_script(
+            "A lone astronaut", 30, llm, footage_source="ai_image", story_continuity=True,
+        )
+
+        assert llm.generate_script.call_count == 2
+        assert len(result.image_prompts) == 2
+        assert "astronaut" in result.image_prompts[0]
+        assert "astronaut" in result.image_prompts[1]
+
+    def test_style_guide_failure_falls_back_to_independent_prompts(self) -> None:
+        llm = MagicMock()
+        llm.generate_script.side_effect = [
+            "One sentence. Two sentence.",
+            RuntimeError("style guide call failed"),
+        ]
+        llm.break_into_scenes.return_value = [
+            {"title": "a", "narration": "One sentence.", "image_prompt": "prompt one"},
+            {"title": "b", "narration": "Two sentence.", "image_prompt": "prompt two"},
+        ]
+
+        result = generate_shorts_script(
+            "Topic", 30, llm, footage_source="ai_image", story_continuity=True,
+        )
+
+        assert len(result.image_prompts) == 2
+
+    def test_image_prompt_extraction_failure_falls_back_to_visual_queries(self) -> None:
         llm = MagicMock()
         llm.generate_script.return_value = "One sentence. Two sentence."
-        llm.break_into_scenes.side_effect = [
-            [{"title": "only one", "narration": "One sentence."}],
-            RuntimeError("still bad"),
+        # Both scene-extraction attempts are missing image_prompt entirely:
+        llm.break_into_scenes.return_value = [
+            {"title": "query one", "narration": "One sentence."},
+            {"title": "query two", "narration": "Two sentence."},
         ]
-        generate_shorts_script("Space facts", 30, llm)
-        assert llm.break_into_scenes.call_count == 2
 
-    def test_punch_recovered_from_retry_when_first_attempt_had_none(self) -> None:
-        llm = MagicMock()
-        llm.generate_script.return_value = "One sentence. Two sentence."
-        llm.break_into_scenes.side_effect = [
-            [{"title": "only one", "narration": "One sentence."}],  # count mismatch -> retry
-            [
-                {"title": "a", "narration": "One sentence.", "punch": "BIG NUMBER"},
-                {"title": "b", "narration": "Two sentence."},
-            ],
-        ]
-        result = generate_shorts_script("Space facts", 30, llm)
-        assert result.punch == (0, "BIG NUMBER")
+        result = generate_shorts_script(
+            "Topic", 30, llm, footage_source="ai_image", story_continuity=False,
+        )
+
+        assert result.image_prompts == ("query one", "query two")
