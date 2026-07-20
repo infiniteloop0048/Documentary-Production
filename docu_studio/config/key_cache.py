@@ -19,6 +19,9 @@ _USERNAMES = [
     "docu_studio_coverr",
     "docu_studio_serper",
     "docu_studio_jamendo",
+    "docu_studio_gemini",
+    "docu_studio_replicate",
+    "docu_studio_fal",
 ]
 
 _cache: dict[str, str] = {}
