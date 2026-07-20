@@ -16,14 +16,21 @@ from enum import Enum
 from pathlib import Path
 
 from docu_studio.adapters.footage.base import FootageProvider
+from docu_studio.adapters.image_gen.base import ImageGenProvider
 from docu_studio.adapters.llm.base import LLMProvider
+from docu_studio.adapters.photos.base import PhotoProvider
 from docu_studio.adapters.tts.base import TTSProvider
 from docu_studio.history.run_history import RunRecord, save_run
 from docu_studio.output.project_folder import create_project_folder
 from docu_studio.pipeline.events import ErrorEvent, LogEvent, LogLevel, ProgressEvent
 from docu_studio.shorts.capability_resolvers import get_word_timestamps
 from docu_studio.shorts.shorts_assembly import assemble_short
-from docu_studio.shorts.shorts_config import SHORTS_DEFAULT_MUSIC_VOLUME_DB, ShortsConfig
+from docu_studio.common.captions import DEFAULT_CAPTION_STYLE
+from docu_studio.shorts.shorts_config import (
+    SHORTS_DEFAULT_AI_IMAGE_MODEL,
+    SHORTS_DEFAULT_MUSIC_VOLUME_DB,
+    ShortsConfig,
+)
 from docu_studio.shorts.shorts_ffmpeg import ShortsFFmpeg
 from docu_studio.shorts.shorts_log import QueueLoggingHandler, ShortsTeeQueue
 from docu_studio.shorts.shorts_script_gen import generate_shorts_script
@@ -83,7 +90,9 @@ class ShortsRunner(threading.Thread):
         tts: TTSProvider,
         footage_providers: list[FootageProvider],
         output_base: Path,
+        photo_providers: list[PhotoProvider] | None = None,
         captions_enabled: bool = True,
+        caption_style: str = DEFAULT_CAPTION_STYLE,
         music_enabled: bool = True,
         music_volume_db: float = SHORTS_DEFAULT_MUSIC_VOLUME_DB,
         sensitive_keys: list[str] | None = None,
@@ -94,26 +103,36 @@ class ShortsRunner(threading.Thread):
         jamendo_client_id: str = "",
         beat_sync_enabled: bool = True,
         speed_ramp_enabled: bool = True,
-        punch_enabled: bool = True,
         loop_revisit_enabled: bool = True,
+        cinematic_ending_enabled: bool = True,
         aspect_ratio: str = "9:16",
+        footage_source: str = "video",
+        image_gen_provider: ImageGenProvider | None = None,
+        ai_image_model: str = SHORTS_DEFAULT_AI_IMAGE_MODEL,
+        ai_story_continuity: bool = True,
     ) -> None:
         super().__init__(daemon=True, name="ShortsRunner")
         self.config = ShortsConfig(
             topic=topic,
             aspect_ratio=aspect_ratio,
+            footage_source=footage_source,
+            ai_image_model=ai_image_model,
+            ai_story_continuity=ai_story_continuity,
             duration_seconds=duration_seconds,
             captions_enabled=captions_enabled,
+            caption_style=caption_style,
             music_enabled=music_enabled,
             music_volume_db=music_volume_db,
             beat_sync_enabled=beat_sync_enabled,
             speed_ramp_enabled=speed_ramp_enabled,
-            punch_enabled=punch_enabled,
             loop_revisit_enabled=loop_revisit_enabled,
+            cinematic_ending_enabled=cinematic_ending_enabled,
         )
         self.llm = llm
         self.tts = tts
         self.footage_providers = footage_providers
+        self.photo_providers = photo_providers or []
+        self.image_gen_provider = image_gen_provider
         self.output_base = output_base
         self._tts_provider = tts_provider
         self._tts_voice = tts_voice
@@ -174,6 +193,8 @@ class ShortsRunner(threading.Thread):
         script = generate_shorts_script(
             self.config.topic, self.config.duration_seconds, self.llm,
             tts_provider=self._tts_provider, tts_voice=self._tts_voice,
+            footage_source=self.config.footage_source,
+            story_continuity=self.config.ai_story_continuity,
         )
         (self._project_folder / "script.md").write_text(script.text, encoding="utf-8")
         self.event_queue.put(LogEvent(
@@ -232,15 +253,19 @@ class ShortsRunner(threading.Thread):
             seed=self._seed,
             event_queue=self.event_queue,
             captions_enabled=self.config.captions_enabled,
+            caption_style=self.config.caption_style,
             music_enabled=self.config.music_enabled,
             music_volume_db=self.config.music_volume_db,
             music_provider=self._music_provider,
             jamendo_client_id=self._jamendo_client_id,
             beat_sync_enabled=self.config.beat_sync_enabled,
             speed_ramp_enabled=self.config.speed_ramp_enabled,
-            punch_enabled=self.config.punch_enabled,
             loop_revisit_enabled=self.config.loop_revisit_enabled,
+            cinematic_ending_enabled=self.config.cinematic_ending_enabled,
             output_dimensions=self.config.output_dimensions,
+            footage_source=self.config.footage_source,
+            photo_providers=self.photo_providers,
+            image_gen_provider=self.image_gen_provider,
         )
         if self._cancelled():
             return
