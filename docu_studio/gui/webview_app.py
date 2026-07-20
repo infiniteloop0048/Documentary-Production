@@ -30,7 +30,7 @@ def run():
             shutil.rmtree(cache)
             print(f"Cleared cache: {cache}")
 
-    the_url = str(WEB_DIR / "index.html") + "?v=15"
+    the_url = str(WEB_DIR / "index.html") + "?v=17"
     print("Loading URL:", the_url)
 
     bridge = Bridge()

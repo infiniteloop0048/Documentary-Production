@@ -9,9 +9,12 @@
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: { sans: ['Inter','system-ui','-apple-system','Segoe UI','Helvetica Neue','sans-serif'] },
+          fontFamily: {
+            sans: ['Inter','system-ui','-apple-system','Segoe UI','Helvetica Neue','sans-serif'],
+            serif: ['Iowan Old Style','Georgia','Palatino Linotype','ui-serif','serif'],
+          },
           colors: {
-            app:    '#111318',
+            app:    '#0d0d11',
             panel:  '#1c1e24',
             card:   '#24272e',
             input:  '#2e313a',
@@ -20,9 +23,18 @@
             bstrong:'#52566a',
             dim:    '#b0b8d0',
             faint:  '#7a8099',
-            accent: '#38bdf8',
-            adark:  '#0284c7',
-            atint:  '#0c2d42',
+            /* Primary accent: teal — the "shadows" half of a color-grading
+               duotone, standing in for this studio's own footage-grading
+               identity rather than a generic sky-blue. */
+            accent: '#2dd4bf',
+            adark:  '#0d9488',
+            atint:  '#10312d',
+            /* Warm accent: the "highlights" half of the same duotone —
+               used for the hero signature glow and rare emphasis, never
+               for primary controls (those stay teal). */
+            warm:   '#fb923c',
+            wdark:  '#c2410c',
+            wtint:  '#3a1f10',
           }
         }
       }
@@ -41,10 +53,13 @@
       --anim-med: 200ms;
       --anim-slow: 320ms;
       --ease-out: cubic-bezier(.16,1,.3,1);
+      --ease-in-out: cubic-bezier(.77,0,.175,1);
     }
     [data-screen] { position: relative; z-index: 1; }
 
-    /* ── Ambient background ───────────────────────────────────────── */
+    /* ── Ambient background: a teal/orange duotone glow, the same
+       split-tone language as film color grading — the studio's own
+       "look" applied to itself instead of a generic blue/purple blur. ── */
     .bg-orbs {
       position: fixed; inset: 0; z-index: -1;
       overflow: hidden; pointer-events: none;
@@ -54,11 +69,11 @@
       filter: blur(70px); will-change: transform;
     }
     .orb-a { width: 480px; height: 480px; top: -140px; left: -120px;
-      background: #38bdf8; opacity: .14; animation: orbFloatA 26s var(--ease-out) infinite; }
+      background: #2dd4bf; opacity: .13; animation: orbFloatA 26s var(--ease-in-out) infinite; }
     .orb-b { width: 420px; height: 420px; bottom: -160px; right: -100px;
-      background: #a855f7; opacity: .12; animation: orbFloatB 32s var(--ease-out) infinite; }
+      background: #fb923c; opacity: .10; animation: orbFloatB 32s var(--ease-in-out) infinite; }
     .orb-c { width: 320px; height: 320px; top: 40%; left: 55%;
-      background: #0284c7; opacity: .10; animation: orbFloatC 22s var(--ease-out) infinite; }
+      background: #0d9488; opacity: .09; animation: orbFloatC 22s var(--ease-in-out) infinite; }
     @keyframes orbFloatA {
       0%, 100% { transform: translate(0, 0) scale(1); }
       50% { transform: translate(60px, 50px) scale(1.08); }
@@ -70,6 +85,29 @@
     @keyframes orbFloatC {
       0%, 100% { transform: translate(0, 0) scale(1); }
       50% { transform: translate(-40px, 30px) scale(0.94); }
+    }
+
+    /* ── Film grain: a static, low-opacity noise texture — the same
+       treatment Slideshow's own "grain" overlay offers for a finished
+       video, applied one layer up to the studio's own chrome. Static
+       (not animated): per-frame noise regeneration is pure CPU cost with
+       no perceptible benefit over a fixed texture at this opacity. ── */
+    .bg-grain {
+      position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      opacity: .035; mix-blend-mode: overlay;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    }
+
+    /* ── Sprocket rail: a signature nod to physical film stock — the
+       perforation holes running the length of a reel, reduced to a thin
+       fixed strip along the window edge. Purely decorative and static;
+       present on every screen so it reads as chrome, not a one-off. ── */
+    .sprocket-rail {
+      position: fixed; top: 0; bottom: 0; left: 0; width: 14px; z-index: 5;
+      pointer-events: none; background-color: rgba(0,0,0,.18);
+      background-image: radial-gradient(circle at 7px 10px, rgba(176,184,208,.4) 3px, transparent 3.5px);
+      background-size: 14px 28px; background-repeat: repeat-y;
+      border-right: 1px solid rgba(255,255,255,.04);
     }
 
     /* ── Card entrance + hover lift ────────────────────────────────── */
@@ -86,10 +124,19 @@
     }
     .anim-card:hover {
       transform: translateY(-4px) scale(1.015);
-      box-shadow: 0 8px 30px -8px rgba(56,189,248,.35), 0 2px 10px rgba(0,0,0,.35);
+      box-shadow: 0 8px 30px -8px rgba(45,212,191,.35), 0 2px 10px rgba(0,0,0,.35);
     }
     .anim-card--purple:hover {
       box-shadow: 0 8px 30px -8px rgba(168,85,247,.35), 0 2px 10px rgba(0,0,0,.35);
+    }
+    .anim-card--rose:hover {
+      box-shadow: 0 8px 30px -8px rgba(251,113,133,.35), 0 2px 10px rgba(0,0,0,.35);
+    }
+    .anim-card--emerald:hover {
+      box-shadow: 0 8px 30px -8px rgba(52,211,153,.35), 0 2px 10px rgba(0,0,0,.35);
+    }
+    .anim-card--amber:hover {
+      box-shadow: 0 8px 30px -8px rgba(251,191,36,.35), 0 2px 10px rgba(0,0,0,.35);
     }
     .grid.grid-cols-2 > .anim-card:nth-child(1) { animation-delay: 0ms; }
     .grid.grid-cols-2 > .anim-card:nth-child(2) { animation-delay: 70ms; }
@@ -107,7 +154,7 @@
     button:active { transform: scale(0.97); }
     #start-run-btn:hover, #save-btn:hover {
       filter: brightness(1.08);
-      box-shadow: 0 0 16px -2px rgba(56,189,248,.55);
+      box-shadow: 0 0 16px -2px rgba(45,212,191,.55);
     }
     #open-folder-btn:hover {
       filter: brightness(1.08);
@@ -127,25 +174,86 @@
     }
     .badge-enter { animation: badgeEnter var(--anim-med) var(--ease-out) both; }
 
+    /* ── Toggle switches (replaces bare OS checkboxes) ────────────────
+       State-indication motion on a control that's set occasionally per
+       session, not fired per-keystroke — a 180ms thumb slide is well
+       inside the "tens of times" budget. */
+    input.toggle-switch {
+      appearance: none; -webkit-appearance: none;
+      width: 42px; height: 24px; border-radius: 999px;
+      background: #2e313a; border: 1px solid #383b45;
+      position: relative; cursor: pointer; flex-shrink: 0;
+      transition: background-color 180ms var(--ease-out), border-color 180ms var(--ease-out);
+    }
+    input.toggle-switch::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #e7e9ee; box-shadow: 0 1px 2px rgba(0,0,0,.35);
+      transition: transform 180ms var(--ease-out);
+    }
+    input.toggle-switch:checked { background: #2dd4bf; border-color: transparent; }
+    input.toggle-switch:checked::after { transform: translateX(18px); background: #fff; }
+    input.toggle-switch:focus-visible { outline: 2px solid #2dd4bf; outline-offset: 2px; }
+    input.toggle-switch:active::after { width: 20px; } /* subtle squash on press */
+
+    /* ── Dynamic list rows (images, clips, history) ───────────────────
+       Prevents newly-rendered rows from teleporting into the DOM. */
+    @keyframes listItemEnter {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .list-item-enter { animation: listItemEnter var(--anim-med) var(--ease-out) both; }
+
+    /* ── Log lines ─────────────────────────────────────────────────────
+       Fired tens of times per run — kept to opacity-only and near the
+       floor of the duration budget so a busy log never feels animated. */
+    @keyframes logLineIn { from { opacity: 0; } to { opacity: 1; } }
+    .log-line { animation: logLineIn 150ms ease-out both; }
+
+    /* ── Screen transitions ────────────────────────────────────────────
+       Screens previously swapped via instant display:none/flex. Occasional
+       frequency (a handful of navigations per session) and a real purpose
+       (preventing a jarring full-view teleport) — both clear the bar. */
+    @keyframes screenEnter {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .screen-enter-active { animation: screenEnter 260ms var(--ease-out) both; }
+
+    /* ── Stage tracker pills ───────────────────────────────────────────
+       className is swapped wholesale on state change; keeping a stable
+       .stage-pill class across every state means the color/border swap
+       still transitions instead of snapping. */
+    .stage-pill {
+      transition: background-color 200ms ease, color 200ms ease,
+                  border-color 200ms ease, transform 200ms var(--ease-out);
+    }
+    .stage-pill.is-active { transform: scale(1.05); }
+
     /* ── Reduced motion ───────────────────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
       .bg-orbs { display: none; }
-      .anim-card, .badge-enter, .ripple, button {
+      .anim-card, .badge-enter, .ripple, button,
+      .list-item-enter, .log-line, .screen-enter-active {
         animation: none !important;
         transition: none !important;
       }
       .anim-card:hover { transform: none !important; box-shadow: none !important; }
       button:active { transform: none !important; }
+      .stage-pill { transition: none !important; }
+      .stage-pill.is-active { transform: none !important; }
+      input.toggle-switch, input.toggle-switch::after { transition-duration: 50ms !important; }
     }
   </style>
 </head>
 <body class="bg-app text-white font-sans">
-<div style="position:fixed;top:0;right:0;background:red;color:white;z-index:9999;padding:4px">v5</div>
 <div class="bg-orbs" aria-hidden="true">
   <div class="orb orb-a"></div>
   <div class="orb orb-b"></div>
   <div class="orb orb-c"></div>
 </div>
+<div class="bg-grain" aria-hidden="true"></div>
+<div class="sprocket-rail" aria-hidden="true"></div>
 
 <!-- ═══════════════════════════════════════════════════════════════
      SCREEN 1: MAIN
@@ -154,7 +262,15 @@
   <!-- Top bar -->
   <div class="h-14 bg-panel border-b border-border px-6 flex items-center justify-between shrink-0">
     <div class="flex items-center">
-      <span class="font-semibold text-xl text-white">Docu Studio</span>
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <circle cx="12" cy="12" r="7.5" stroke-width="1.5"/>
+        <circle cx="12" cy="12" r="2.4" stroke-width="1.5"/>
+        <circle cx="7.6" cy="8.4" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="16.4" cy="8.4" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="7.6" cy="15.6" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="16.4" cy="15.6" r="1" fill="currentColor" stroke="none"/>
+      </svg>
+      <span class="font-serif font-semibold text-xl text-white ml-2 tracking-tight">Docu Studio</span>
       <span class="text-xs text-faint bg-hover px-2 py-0.5 rounded ml-2">v1.0</span>
     </div>
     <button onclick="showScreen('settings')" class="p-2 rounded-lg bg-card border border-border text-dim hover:text-white hover:border-bstrong transition-colors" title="Settings">
@@ -167,46 +283,81 @@
   </div>
   <!-- Content -->
   <div class="flex-1 overflow-y-auto">
-    <div class="max-w-4xl mx-auto pt-16 pb-12 px-6">
+    <div class="pt-16 pb-12 px-10">
       <!-- Hero -->
-      <h1 class="text-4xl font-bold text-white leading-tight">Automate your documentary pre-production</h1>
-      <p class="text-lg text-dim mt-3">Generate scripts, voiceovers, and stock footage timelines — ready for your editor.</p>
+      <div class="max-w-3xl">
+        <h1 class="font-serif text-5xl font-semibold text-white leading-tight tracking-tight">Automate your documentary <span class="text-transparent bg-clip-text" style="background-image:linear-gradient(100deg,#2dd4bf,#fb923c); -webkit-background-clip:text;">pre-production</span></h1>
+        <p class="text-lg text-dim mt-4">Generate scripts, voiceovers, and stock footage timelines — ready for your editor.</p>
+      </div>
 
       <!-- Mode cards -->
-      <div class="mt-12 grid grid-cols-2 gap-6">
+      <div class="mt-12 grid gap-6" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));">
         <!-- Guided -->
-        <div onclick="startConfig('guided')" class="anim-card bg-card border border-border rounded-xl p-8 hover:border-accent transition-colors cursor-pointer">
+        <div onclick="startConfig('guided')" class="anim-card h-[380px] flex flex-col bg-card border border-border rounded-xl p-8 hover:border-accent transition-colors cursor-pointer">
+          <div class="w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background:rgba(45,212,191,.12)">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <circle cx="12" cy="12" r="8.25" stroke-width="1.5"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.5 8.5l-2 5-5 2 2-5z"/>
+            </svg>
+          </div>
           <div class="text-xs font-semibold tracking-widest text-accent">GUIDED MODE</div>
-          <div class="text-xl font-semibold text-white mt-2">You choose the topic</div>
-          <p class="text-sm text-dim mt-3 leading-relaxed">Enter your documentary topic and target duration. The app writes the script, records voiceover, sources footage, and exports a Filmora timeline.</p>
+          <div class="text-xl font-semibold text-white mt-2 line-clamp-2">You choose the topic</div>
+          <p class="text-sm text-dim mt-3 leading-relaxed flex-1 line-clamp-4">Enter your documentary topic and target duration. The app writes the script, records voiceover, sources footage, and exports a Filmora timeline.</p>
           <button class="mt-6 bg-accent text-app font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-adark transition-colors pointer-events-none">Start guided run →</button>
         </div>
         <!-- Full Auto -->
-        <div onclick="startConfig('auto')" class="anim-card anim-card--purple bg-card border border-border rounded-xl p-8 hover:border-purple-400 transition-colors cursor-pointer">
+        <div onclick="startConfig('auto')" class="anim-card anim-card--purple h-[380px] flex flex-col bg-card border border-border rounded-xl p-8 hover:border-purple-400 transition-colors cursor-pointer">
+          <div class="w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background:rgba(192,132,252,.14)">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 3.5l1.4 3.7 3.7 1.4-3.7 1.4L12 13.7l-1.4-3.7-3.7-1.4 3.7-1.4z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18 14.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>
+            </svg>
+          </div>
           <div class="text-xs font-semibold tracking-widest text-purple-400">FULL AUTO MODE</div>
-          <div class="text-xl font-semibold text-white mt-2">AI finds a trending topic</div>
-          <p class="text-sm text-dim mt-3 leading-relaxed">No input needed. The app searches for trending documentary subjects, picks the best one, and runs the entire pipeline automatically.</p>
+          <div class="text-xl font-semibold text-white mt-2 line-clamp-2">AI finds a trending topic</div>
+          <p class="text-sm text-dim mt-3 leading-relaxed flex-1 line-clamp-4">No input needed. The app searches for trending documentary subjects, picks the best one, and runs the entire pipeline automatically.</p>
           <button class="mt-6 bg-purple-500 text-white font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-purple-600 transition-colors pointer-events-none">Start auto run →</button>
         </div>
         <!-- Short / Reel -->
-        <div onclick="startConfig('short')" class="anim-card col-span-2 bg-card border border-border rounded-xl p-8 hover:border-rose-400 transition-colors cursor-pointer">
+        <div onclick="startConfig('short')" class="anim-card anim-card--rose h-[380px] flex flex-col bg-card border border-border rounded-xl p-8 hover:border-rose-400 transition-colors cursor-pointer">
+          <div class="w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background:rgba(251,113,133,.12)">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <rect x="8" y="3.5" width="8" height="17" rx="1.8" stroke-width="1.5"/>
+              <path stroke-linecap="round" stroke-width="1.5" d="M11 18h2"/>
+            </svg>
+          </div>
           <div class="text-xs font-semibold tracking-widest text-rose-400">SHORT / REEL MODE</div>
-          <div class="text-xl font-semibold text-white mt-2">Vertical short-form video</div>
-          <p class="text-sm text-dim mt-3 leading-relaxed">Enter a topic and pick a length from 15 to 60 seconds. The app writes a hook-driven script, records voiceover, and assembles a 9:16 vertical cut with Ken Burns motion — ready for Shorts, Reels, or TikTok.</p>
+          <div class="text-xl font-semibold text-white mt-2 line-clamp-2">Vertical short-form video</div>
+          <p class="text-sm text-dim mt-3 leading-relaxed flex-1 line-clamp-4">Enter a topic and pick a length from 15 to 60 seconds. The app writes a hook-driven script, records voiceover, and assembles a 9:16 vertical cut with Ken Burns motion — ready for Shorts, Reels, or TikTok.</p>
           <button class="mt-6 bg-rose-500 text-white font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-rose-600 transition-colors pointer-events-none">Start short run →</button>
         </div>
         <!-- Slideshow -->
-        <div onclick="startConfig('slideshow')" class="anim-card col-span-2 bg-card border border-border rounded-xl p-8 hover:border-emerald-400 transition-colors cursor-pointer">
+        <div onclick="startConfig('slideshow')" class="anim-card anim-card--emerald h-[380px] flex flex-col bg-card border border-border rounded-xl p-8 hover:border-emerald-400 transition-colors cursor-pointer">
+          <div class="w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background:rgba(52,211,153,.12)">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <rect x="6.5" y="7" width="12" height="9" rx="1.3" stroke-width="1.5" transform="rotate(-6 12.5 11.5)"/>
+              <rect x="5" y="9" width="12" height="9" rx="1.3" stroke-width="1.5" fill="#24272e"/>
+              <circle cx="8.4" cy="12.2" r="1" stroke-width="1.3"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.3" d="M6 16.5l3-2.6 2.2 1.7 2.4-2.9 3.4 3.8"/>
+            </svg>
+          </div>
           <div class="text-xs font-semibold tracking-widest text-emerald-400">SLIDESHOW MODE</div>
-          <div class="text-xl font-semibold text-white mt-2">Turn images into a narrated video</div>
-          <p class="text-sm text-dim mt-3 leading-relaxed">Upload a set of images and write (or paste) a narration script. The app adds Ken Burns motion to each image, times it to your voiceover, and exports a finished video.</p>
+          <div class="text-xl font-semibold text-white mt-2 line-clamp-2">Turn images into a narrated video</div>
+          <p class="text-sm text-dim mt-3 leading-relaxed flex-1 line-clamp-4">Upload a set of images and write (or paste) a narration script. The app adds Ken Burns motion to each image, times it to your voiceover, and exports a finished video.</p>
           <button class="mt-6 bg-emerald-500 text-white font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-emerald-600 transition-colors pointer-events-none">Start slideshow →</button>
         </div>
         <!-- Clip Story -->
-        <div onclick="startConfig('clipstory')" class="anim-card col-span-2 bg-card border border-border rounded-xl p-8 hover:border-amber-400 transition-colors cursor-pointer">
+        <div onclick="startConfig('clipstory')" class="anim-card anim-card--amber h-[380px] flex flex-col bg-card border border-border rounded-xl p-8 hover:border-amber-400 transition-colors cursor-pointer">
+          <div class="w-11 h-11 rounded-lg flex items-center justify-center mb-4" style="background:rgba(251,191,36,.12)">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 9.5l14.5-3 .8 3.3L5.3 12.8z"/>
+              <rect x="4" y="9.5" width="16" height="9.5" rx="1.3" stroke-width="1.5"/>
+              <path stroke-linecap="round" stroke-width="1.3" d="M8 6.8l1.6 2.4M13 5.9l1.6 2.4"/>
+            </svg>
+          </div>
           <div class="text-xs font-semibold tracking-widest text-amber-400">CLIP STORY MODE</div>
-          <div class="text-xl font-semibold text-white mt-2">Compile your own footage into a narrated video</div>
-          <p class="text-sm text-dim mt-3 leading-relaxed">Upload your own video clips in order, trim each one, and write (or flag for AI generation) narration for each — the app fits the narration to each clip's actual length and stitches them together.</p>
+          <div class="text-xl font-semibold text-white mt-2 line-clamp-2">Compile your own footage into a narrated video</div>
+          <p class="text-sm text-dim mt-3 leading-relaxed flex-1 line-clamp-4">Upload your own video clips in order, trim each one, and write (or flag for AI generation) narration for each — the app fits the narration to each clip's actual length and stitches them together.</p>
           <button class="mt-6 bg-amber-500 text-white font-semibold text-sm px-5 py-2.5 rounded-lg hover:bg-amber-600 transition-colors pointer-events-none">Start Clip Story →</button>
         </div>
       </div>
@@ -228,7 +379,7 @@
   <!-- Top bar -->
   <div class="h-14 bg-panel border-b border-border px-6 flex items-center shrink-0">
     <button onclick="showScreen('main')" class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-[#24272e] text-[#8b95b0] border border-[#52566a] hover:text-white hover:border-[#8b95b0] transition-colors cursor-pointer">← Back</button>
-    <span class="font-semibold text-white ml-4">Configure run</span>
+    <span class="font-serif font-semibold text-white ml-4">Configure run</span>
   </div>
   <!-- Content -->
   <div class="flex-1 overflow-y-auto">
@@ -269,6 +420,45 @@
           <div id="shorts-duration-hint" class="mt-3 text-xs text-faint">Target: 30s ≈ 85 words of narration</div>
         </div>
 
+        <!-- Footage source (short/reel) -->
+        <div id="footage-source-row" class="mt-4" style="display:none">
+          <label class="text-sm font-medium text-dim block">Footage source</label>
+          <select id="shorts-footage-source-select" onchange="onFootageSourceChange(this.value)"
+            class="mt-2 w-full bg-input border border-border rounded-lg px-4 py-3 text-white text-sm focus:border-accent focus:outline-none">
+            <option value="video">Video clips — stock footage</option>
+            <option value="image">Images — stock photos with Ken Burns motion</option>
+            <option value="ai_image">AI-generated images — unique art per scene</option>
+          </select>
+        </div>
+
+        <!-- AI image model (short/reel, only when footage_source = ai_image) -->
+        <div id="ai-image-model-row" class="mt-4" style="display:none">
+          <label class="text-sm font-medium text-dim block">AI image model</label>
+          <select id="shorts-ai-image-model-select" onchange="_updateAiImageCostEstimate()"
+            class="mt-2 w-full bg-input border border-border rounded-lg px-4 py-3 text-white text-sm focus:border-accent focus:outline-none">
+            <option value="replicate_flux_schnell">Replicate — FLUX.1 Schnell (cheap, ~$0.003/image)</option>
+            <option value="fal_flux_schnell">fal.ai — FLUX.1 Schnell (cheap, ~$0.003/image)</option>
+            <option value="replicate_sdxl">Replicate — SDXL (cheap, ~$0.0055/image)</option>
+            <option value="replicate_flux_dev">Replicate — FLUX.1 Dev (mid, ~$0.025/image)</option>
+            <option value="fal_flux_dev">fal.ai — FLUX.1 Dev (mid, ~$0.025/image)</option>
+            <option value="gemini_nano_banana">Google — Nano Banana (mid, ~$0.04/image)</option>
+            <option value="openai_gpt_image_1">OpenAI — GPT-Image-1 (premium, ~$0.07/image)</option>
+            <option value="gemini_nano_banana_pro">Google — Nano Banana Pro (premium, ~$0.15/image)</option>
+          </select>
+        </div>
+
+        <!-- AI story continuity toggle (short/reel) -->
+        <div id="ai-story-continuity-row" class="mt-4 flex items-center justify-between" style="display:none">
+          <div>
+            <label class="text-sm font-medium text-dim block">Connected story</label>
+            <p class="text-xs text-faint mt-0.5">On: one consistent style/character across every scene. Off: each scene generated independently.</p>
+          </div>
+          <input id="ai-story-continuity-toggle" type="checkbox" checked class="toggle-switch">
+        </div>
+
+        <!-- AI cost estimate (short/reel) -->
+        <div id="ai-cost-estimate-row" class="mt-2 text-xs text-faint" style="display:none"></div>
+
         <!-- Aspect ratio (short/reel) -->
         <div id="aspect-row" class="mt-4" style="display:none">
           <label class="text-sm font-medium text-dim block">Aspect ratio</label>
@@ -284,9 +474,21 @@
         <div id="captions-row" class="mt-6 flex items-center justify-between" style="display:none">
           <div>
             <label class="text-sm font-medium text-dim block">Burned-in captions</label>
-            <p class="text-xs text-faint mt-0.5">Word-level pop captions in the safe area.</p>
+            <p class="text-xs text-faint mt-0.5">Word-level captions in the safe area.</p>
           </div>
-          <input id="captions-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+          <input id="captions-toggle" type="checkbox" checked class="toggle-switch">
+        </div>
+
+        <!-- Caption style (short/reel) -->
+        <div id="caption-style-row" class="mt-4" style="display:none">
+          <label class="text-sm font-medium text-dim block">Caption style</label>
+          <select id="caption-style-select"
+            class="mt-2 w-full bg-input border border-border rounded-lg px-4 py-3 text-white text-sm focus:border-accent focus:outline-none">
+            <option value="pop">Pop — animated word scale-up</option>
+            <option value="karaoke">Karaoke — gold highlight on spoken word</option>
+            <option value="big_word">Big word — one large word at a time</option>
+            <option value="boxed_minimal">Boxed minimal — clean subtitle bar</option>
+          </select>
         </div>
 
         <!-- Music toggle (short/reel) -->
@@ -295,7 +497,7 @@
             <label class="text-sm font-medium text-dim block">Background music</label>
             <p class="text-xs text-faint mt-0.5">Ducked under narration, only if a track is available.</p>
           </div>
-          <input id="music-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+          <input id="music-toggle" type="checkbox" checked class="toggle-switch">
         </div>
 
         <!-- Music volume (short/reel) -->
@@ -317,28 +519,28 @@
                 <label class="text-sm font-medium text-dim block">Beat-synced cuts</label>
                 <p class="text-xs text-faint mt-0.5">Snap cut points to the music's beat grid, when a track resolves.</p>
               </div>
-              <input id="beat-sync-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+              <input id="beat-sync-toggle" type="checkbox" checked class="toggle-switch">
             </div>
             <div class="flex items-center justify-between">
               <div>
                 <label class="text-sm font-medium text-dim block">Speed ramping</label>
                 <p class="text-xs text-faint mt-0.5">Speed up slow, static segments to add energy.</p>
               </div>
-              <input id="speed-ramp-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
-            </div>
-            <div class="flex items-center justify-between">
-              <div>
-                <label class="text-sm font-medium text-dim block">Text-punch frames</label>
-                <p class="text-xs text-faint mt-0.5">Full-frame stat card for the script's single most striking line.</p>
-              </div>
-              <input id="punch-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+              <input id="speed-ramp-toggle" type="checkbox" checked class="toggle-switch">
             </div>
             <div class="flex items-center justify-between">
               <div>
                 <label class="text-sm font-medium text-dim block">Loop revisit</label>
                 <p class="text-xs text-faint mt-0.5">Replay a moment from the first clip in the final seconds.</p>
               </div>
-              <input id="loop-revisit-toggle" type="checkbox" checked class="w-5 h-5 accent-accent cursor-pointer">
+              <input id="loop-revisit-toggle" type="checkbox" checked class="toggle-switch">
+            </div>
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-dim block">Cinematic ending</label>
+                <p class="text-xs text-faint mt-0.5">Hold on the final frame for a beat after narration ends — video and music continue, no voice.</p>
+              </div>
+              <input id="cinematic-ending-toggle" type="checkbox" checked class="toggle-switch">
             </div>
           </div>
         </details>
@@ -364,6 +566,7 @@
         <!-- Images (slideshow) -->
         <div id="slideshow-images-row" class="mt-6" style="display:none">
           <label class="text-sm font-medium text-dim block">Images</label>
+          <p class="text-xs text-faint mt-0.5">Added in the order you select them. Drag a row (⠿), or use ↑/↓, to reorder — the slideshow follows this exact order.</p>
           <button onclick="browseSlideshowImages()" type="button"
             class="mt-2 px-4 py-2 rounded-lg text-sm font-semibold bg-card border border-border text-dim hover:text-white hover:border-bstrong transition-colors">
             Choose images…
@@ -401,9 +604,20 @@
           <label class="text-sm font-medium text-dim block">Transition</label>
           <select id="slideshow-transition-select"
             class="mt-2 w-full bg-input border border-border rounded-lg px-4 py-3 text-white text-sm focus:border-accent focus:outline-none">
+            <option value="varied" selected>Varied (auto-mix) — a different transition each time</option>
             <option value="cut">Hard cut</option>
             <option value="crossfade">Crossfade</option>
+            <option value="slideleft">Slide left</option>
+            <option value="slideright">Slide right</option>
+            <option value="slideup">Slide up</option>
+            <option value="slidedown">Slide down</option>
+            <option value="wipeleft">Wipe left</option>
+            <option value="wiperight">Wipe right</option>
+            <option value="zoomin">Zoom in</option>
+            <option value="circleopen">Circle open</option>
+            <option value="dissolve">Dissolve</option>
           </select>
+          <p class="mt-2 text-xs text-faint">Every image also gets its own varied Ken Burns motion — zoom, pan, or a corner-anchored zoom+pan — automatically.</p>
         </div>
 
         <!-- Vignette toggle (slideshow) -->
@@ -412,7 +626,7 @@
             <label class="text-sm font-medium text-dim block">Vignette</label>
             <p class="text-xs text-faint mt-0.5">Subtle darkened edges.</p>
           </div>
-          <input id="slideshow-vignette-toggle" type="checkbox" class="w-5 h-5 accent-accent cursor-pointer">
+          <input id="slideshow-vignette-toggle" type="checkbox" class="toggle-switch">
         </div>
 
         <!-- Grain toggle (slideshow) -->
@@ -421,7 +635,7 @@
             <label class="text-sm font-medium text-dim block">Film grain</label>
             <p class="text-xs text-faint mt-0.5">Subtle texture overlay.</p>
           </div>
-          <input id="slideshow-grain-toggle" type="checkbox" class="w-5 h-5 accent-accent cursor-pointer">
+          <input id="slideshow-grain-toggle" type="checkbox" class="toggle-switch">
         </div>
 
         <!-- Captions toggle (slideshow) -->
@@ -430,7 +644,19 @@
             <label class="text-sm font-medium text-dim block">Burned-in captions</label>
             <p class="text-xs text-faint mt-0.5">Word-level pop captions in the safe area.</p>
           </div>
-          <input id="slideshow-captions-toggle" type="checkbox" class="w-5 h-5 accent-accent cursor-pointer">
+          <input id="slideshow-captions-toggle" type="checkbox" class="toggle-switch">
+        </div>
+
+        <!-- Caption style (slideshow) -->
+        <div id="slideshow-caption-style-row" class="mt-4" style="display:none">
+          <label class="text-sm font-medium text-dim block">Caption style</label>
+          <select id="slideshow-caption-style-select"
+            class="mt-2 w-full bg-input border border-border rounded-lg px-4 py-3 text-white text-sm focus:border-accent focus:outline-none">
+            <option value="pop">Pop — animated word scale-up</option>
+            <option value="karaoke">Karaoke — gold highlight on spoken word</option>
+            <option value="big_word">Big word — one large word at a time</option>
+            <option value="boxed_minimal">Boxed minimal — clean subtitle bar</option>
+          </select>
         </div>
 
         <!-- Music toggle (slideshow) -->
@@ -441,7 +667,7 @@
               <p class="text-xs text-faint mt-0.5">Ducked under narration, only if a track is available.</p>
             </div>
             <input id="slideshow-music-toggle" type="checkbox"
-              onchange="onSlideshowMusicToggleChange()" class="w-5 h-5 accent-accent cursor-pointer">
+              onchange="onSlideshowMusicToggleChange()" class="toggle-switch">
           </div>
           <div id="slideshow-music-provider-row" class="mt-3" style="display:none">
             <select id="slideshow-music-provider-select" onchange="onSlideshowMusicProviderChange(this.value)"
@@ -457,6 +683,37 @@
             </div>
           </div>
         </div>
+
+        <!-- Music volume (slideshow) -->
+        <div id="slideshow-music-volume-row" class="mt-4" style="display:none">
+          <label class="text-sm font-medium text-dim block">Music volume</label>
+          <div class="mt-2 flex items-center gap-4">
+            <input id="slideshow-music-volume-slider" type="range" min="-40" max="0" step="1" value="-20"
+              class="flex-1 accent-accent">
+            <span id="slideshow-music-volume-label" class="text-sm font-semibold text-accent w-16">-20 dB</span>
+          </div>
+        </div>
+
+        <!-- Advanced toggles (slideshow) -->
+        <details id="slideshow-advanced-row" class="mt-4" style="display:none">
+          <summary class="text-sm font-medium text-dim cursor-pointer select-none">Advanced</summary>
+          <div class="mt-3 space-y-4 pl-1">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-dim block">Loop revisit</label>
+                <p class="text-xs text-faint mt-0.5">Replay the first image in the final seconds.</p>
+              </div>
+              <input id="slideshow-loop-revisit-toggle" type="checkbox" checked class="toggle-switch">
+            </div>
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-dim block">Cinematic ending</label>
+                <p class="text-xs text-faint mt-0.5">Hold on the final frame for a beat after narration ends — video and music continue, no voice.</p>
+              </div>
+              <input id="slideshow-cinematic-ending-toggle" type="checkbox" checked class="toggle-switch">
+            </div>
+          </div>
+        </details>
 
         <!-- Topic (clipstory) -->
         <div id="clipstory-topic-row" class="mt-6" style="display:none">
@@ -514,7 +771,7 @@
             <label class="text-sm font-medium text-dim block">Burned-in captions</label>
             <p class="text-xs text-faint mt-0.5">Word-level pop captions, per clip.</p>
           </div>
-          <input id="clipstory-captions-toggle" type="checkbox" class="w-5 h-5 accent-accent cursor-pointer">
+          <input id="clipstory-captions-toggle" type="checkbox" class="toggle-switch">
         </div>
 
         <!-- Music toggle (clipstory) -->
@@ -525,7 +782,7 @@
               <p class="text-xs text-faint mt-0.5">Ducked under narration, only if a track is available.</p>
             </div>
             <input id="clipstory-music-toggle" type="checkbox"
-              onchange="onClipStoryMusicToggleChange()" class="w-5 h-5 accent-accent cursor-pointer">
+              onchange="onClipStoryMusicToggleChange()" class="toggle-switch">
           </div>
           <div id="clipstory-music-provider-row" class="mt-3" style="display:none">
             <select id="clipstory-music-provider-select" onchange="onClipStoryMusicProviderChange(this.value)"
@@ -560,7 +817,7 @@
   <div class="h-14 bg-panel border-b border-border px-6 flex items-center shrink-0">
     <button id="cancel-btn" class="text-sm text-dim hover:text-red-400 transition-colors px-3 py-1.5 rounded-lg hover:bg-hover">✕ Cancel</button>
     <button id="back-btn" onclick="showScreen('main')" class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-[#24272e] text-[#8b95b0] border border-[#52566a] hover:text-white hover:border-[#8b95b0] transition-colors cursor-pointer" style="display:none">← Back</button>
-    <span id="progress-title" class="font-semibold text-white ml-4">Generating…</span>
+    <span id="progress-title" class="font-serif font-semibold text-white ml-4">Generating…</span>
   </div>
   <!-- Content -->
   <div class="flex-1 overflow-y-auto">
@@ -619,7 +876,7 @@
   <!-- Top bar -->
   <div class="h-14 bg-panel border-b border-border px-6 flex items-center shrink-0">
     <button onclick="showScreen('main')" class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-[#24272e] text-[#8b95b0] border border-[#52566a] hover:text-white hover:border-[#8b95b0] transition-colors cursor-pointer">← Back</button>
-    <span class="font-semibold text-white ml-4">Settings</span>
+    <span class="font-serif font-semibold text-white ml-4">Settings</span>
   </div>
   <!-- Content -->
   <div class="flex-1 overflow-y-auto">
@@ -672,6 +929,13 @@
               <input type="password" id="openrouter-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
               <button onclick="toggleReveal('openrouter-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
             </div>
+          </div>
+          <div id="reasoning-row" class="flex items-center justify-between" style="display:none">
+            <div>
+              <label class="text-sm font-medium text-dim block">Model reasoning</label>
+              <p class="text-xs text-faint mt-0.5">On: higher token budget, model may think before writing.<br>Off: lower token budget, faster and more reliable for short scripts.</p>
+            </div>
+            <input id="reasoning-toggle" type="checkbox" class="toggle-switch shrink-0 ml-4">
           </div>
           <div id="key-row-groq" style="display:none">
             <label class="text-sm font-medium text-dim block mb-2">Groq API Key</label>
@@ -730,7 +994,7 @@
             <label class="block text-sm font-medium text-[#b0b8d0]">Primary source</label>
             <select id="footage-primary" onchange="onFootageChange('primary')"
               class="bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
-                     text-white text-sm focus:border-sky-400 focus:outline-none
+                     text-white text-sm focus:border-accent focus:outline-none
                      cursor-pointer w-48 mt-1">
               <option value="pexels">Pexels</option>
               <option value="pixabay">Pixabay</option>
@@ -742,7 +1006,7 @@
               <div class="flex gap-2 mt-1">
                 <input type="password" id="footage-primary-key"
                   class="flex-1 bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
-                         text-white text-sm font-mono focus:border-sky-400 focus:outline-none">
+                         text-white text-sm font-mono focus:border-accent focus:outline-none">
                 <button onclick="toggleReveal('footage-primary-key', this)"
                   class="px-4 py-2.5 bg-[#383b45] border border-[#383b45] rounded-lg
                          text-[#b0b8d0] text-sm hover:text-white transition-colors cursor-pointer">
@@ -757,7 +1021,7 @@
             <label class="block text-sm font-medium text-[#b0b8d0]">Fallback source</label>
             <select id="footage-fallback" onchange="onFootageChange('fallback')"
               class="bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
-                     text-white text-sm focus:border-sky-400 focus:outline-none
+                     text-white text-sm focus:border-accent focus:outline-none
                      cursor-pointer w-48 mt-1">
               <option value="pixabay">Pixabay</option>
               <option value="pexels">Pexels</option>
@@ -770,7 +1034,7 @@
               <div class="flex gap-2 mt-1">
                 <input type="password" id="footage-fallback-key"
                   class="flex-1 bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
-                         text-white text-sm font-mono focus:border-sky-400 focus:outline-none">
+                         text-white text-sm font-mono focus:border-accent focus:outline-none">
                 <button onclick="toggleReveal('footage-fallback-key', this)"
                   class="px-4 py-2.5 bg-[#383b45] border border-[#383b45] rounded-lg
                          text-[#b0b8d0] text-sm hover:text-white transition-colors cursor-pointer">
@@ -788,7 +1052,7 @@
             <label class="block text-sm font-medium text-[#b0b8d0]">Second fallback source</label>
             <select id="footage-fallback2" onchange="onFootageChange('fallback2')"
               class="bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
-                     text-white text-sm focus:border-sky-400 focus:outline-none
+                     text-white text-sm focus:border-accent focus:outline-none
                      cursor-pointer w-48 mt-1">
               <option value="none" selected>None (disabled)</option>
               <option value="pexels">Pexels</option>
@@ -801,7 +1065,7 @@
               <div class="flex gap-2 mt-1">
                 <input type="password" id="footage-fallback2-key"
                   class="flex-1 bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
-                         text-white text-sm font-mono focus:border-sky-400 focus:outline-none">
+                         text-white text-sm font-mono focus:border-accent focus:outline-none">
                 <button onclick="toggleReveal('footage-fallback2-key', this)"
                   class="px-4 py-2.5 bg-[#383b45] border border-[#383b45] rounded-lg
                          text-[#b0b8d0] text-sm hover:text-white transition-colors cursor-pointer">
@@ -818,7 +1082,7 @@
             <div class="flex gap-2 mt-1">
               <input type="password" id="coverr-key-input"
                 class="flex-1 bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
-                       text-white text-sm font-mono focus:border-sky-400 focus:outline-none">
+                       text-white text-sm font-mono focus:border-accent focus:outline-none">
               <button onclick="toggleReveal('coverr-key-input', this)"
                 class="px-4 py-2.5 bg-[#383b45] border border-[#383b45] rounded-lg
                        text-[#b0b8d0] text-sm hover:text-white transition-colors cursor-pointer">
@@ -832,7 +1096,7 @@
             <label class="block text-sm font-medium text-[#b0b8d0]">If footage runs short:</label>
             <select id="footage-shortage-select"
               class="bg-[#2e313a] border border-[#383b45] rounded-lg px-4 py-2.5
-                     text-white text-sm focus:border-sky-400 focus:outline-none
+                     text-white text-sm focus:border-accent focus:outline-none
                      cursor-pointer w-48 mt-1">
               <option value="loop">Loop existing clips</option>
               <option value="fetch">Fetch more clips</option>
@@ -852,6 +1116,41 @@
           <div class="flex gap-2">
             <input type="password" id="serper-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
             <button onclick="toggleReveal('serper-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 4c: AI Image Generation -->
+      <div class="anim-card bg-card border border-border rounded-xl mb-5 overflow-hidden">
+        <div class="h-0.5 w-full bg-indigo-500"></div>
+        <div class="px-6 py-4 border-b border-border">
+          <span class="font-semibold text-white text-sm">AI Image Generation</span>
+        </div>
+        <div class="px-6 py-5 space-y-5">
+          <p class="text-xs text-faint">
+            Used by the Short/Reel "AI-generated images" footage source. The OpenAI key
+            above (Script Generation card) is reused for OpenAI's image model.
+          </p>
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">Google Gemini API Key</label>
+            <div class="flex gap-2">
+              <input type="password" id="gemini-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+              <button onclick="toggleReveal('gemini-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+            </div>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">Replicate API Token</label>
+            <div class="flex gap-2">
+              <input type="password" id="replicate-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+              <button onclick="toggleReveal('replicate-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+            </div>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-dim block mb-2">fal.ai API Key</label>
+            <div class="flex gap-2">
+              <input type="password" id="fal-key" class="flex-1 bg-input border border-border rounded-lg px-4 py-2.5 text-white text-sm font-mono focus:border-accent focus:outline-none">
+              <button onclick="toggleReveal('fal-key', this)" class="px-4 py-2.5 bg-hover border border-border rounded-lg text-dim text-sm hover:text-white transition-colors">Reveal</button>
+            </div>
           </div>
         </div>
       </div>

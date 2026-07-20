@@ -14,7 +14,15 @@ const PROVIDER_MODELS = {
 
 function showScreen(name) {
   document.querySelectorAll('[data-screen]').forEach(el => {
-    el.style.display = el.dataset.screen === name ? 'flex' : 'none';
+    const isTarget = el.dataset.screen === name;
+    el.style.display = isTarget ? 'flex' : 'none';
+    if (isTarget) {
+      // Restart the entrance animation on every navigation, not just first
+      // paint — remove the class, force a reflow, then re-add it.
+      el.classList.remove('screen-enter-active');
+      void el.offsetWidth;
+      el.classList.add('screen-enter-active');
+    }
   });
   if (name === 'settings') _loadSettings();
   if (name === 'main')     _loadHistory();
@@ -28,6 +36,7 @@ async function _loadSettings() {
     _q('llm-provider').value = s.llm_provider || 'Anthropic';
     onProviderChange(s.llm_provider || 'Anthropic', s.llm_model);
     _q('custom-model-input').value = s.llm_custom_model || '';
+    _q('reasoning-toggle').checked = !!s.llm_reasoning_enabled;
     const ttsProv = s.tts_provider || 'gtts';
     _q('tts-provider').value = ttsProv;
     onTtsChange(ttsProv);
@@ -41,6 +50,9 @@ async function _loadSettings() {
     _q('openrouter-key').value = s.openrouter_key || '';
     _q('groq-key').value       = s.groq_key       || '';
     _q('serper-key').value     = s.serper_key     || '';
+    _q('gemini-key').value     = s.gemini_key     || '';
+    _q('replicate-key').value  = s.replicate_key  || '';
+    _q('fal-key').value        = s.fal_key        || '';
     const fprimary   = s.footage_primary   || 'pexels';
     const ffallback  = s.footage_fallback  || 'pixabay';
     const ffallback2 = s.footage_fallback2 || 'none';
@@ -77,6 +89,8 @@ function onProviderChange(provider, keepModel) {
     const row = _q('key-row-' + p);
     if (row) row.style.display = p !== provider.toLowerCase() ? 'none' : '';
   });
+  const reasoningRow = _q('reasoning-row');
+  if (reasoningRow) reasoningRow.style.display = provider === 'OpenRouter' ? '' : 'none';
   const customInput = _q('custom-model-input');
   if (customInput) customInput.value = '';
 }
@@ -110,6 +124,38 @@ function onFootageChange(role) {
     coverrRow.style.display =
       (prim === 'coverr' || fall === 'coverr' || fall2 === 'coverr') ? '' : 'none';
   }
+}
+
+function onFootageSourceChange(value) {
+  const isAiImage = value === 'ai_image';
+  _q('ai-image-model-row').style.display = isAiImage ? '' : 'none';
+  _q('ai-story-continuity-row').style.display = isAiImage ? '' : 'none';
+  _q('ai-cost-estimate-row').style.display = isAiImage ? '' : 'none';
+  if (isAiImage) _updateAiImageCostEstimate();
+}
+
+const _AI_IMAGE_PRICES_USD = {
+  replicate_flux_schnell: 0.003,
+  fal_flux_schnell: 0.003,
+  replicate_sdxl: 0.0055,
+  replicate_flux_dev: 0.025,
+  fal_flux_dev: 0.025,
+  gemini_nano_banana: 0.04,
+  openai_gpt_image_1: 0.07,
+  gemini_nano_banana_pro: 0.15,
+};
+
+function _updateAiImageCostEstimate() {
+  const model = _q('shorts-ai-image-model-select').value;
+  const price = _AI_IMAGE_PRICES_USD[model] || 0;
+  // Rough scene-count estimate: one image per ~4.5s of narration at the
+  // Shorts default pace — matches the segment cadence the pipeline actually
+  // produces closely enough for a pre-run estimate, not exact billing.
+  const secs = parseInt(_q('shorts-duration-slider').value) || 30;
+  const sceneCount = Math.max(1, Math.round(secs / 4.5));
+  const total = (sceneCount * price).toFixed(3);
+  _q('ai-cost-estimate-row').textContent =
+    `Estimated cost: ~${sceneCount} images × $${price.toFixed(3)} = ~$${total}`;
 }
 
 function onMusicProviderChange(provider) {
@@ -163,6 +209,7 @@ async function saveSettings() {
     llm_provider:     provider,
     llm_model:        customModel || _q('llm-model').value,
     llm_custom_model: customModel,
+    llm_reasoning_enabled: _q('reasoning-toggle').checked,
     tts_provider:    ttsProv,
     deepgram_voice:  _q('dg-voice').value,
     output_folder:   _q('output-folder').value,
@@ -181,6 +228,9 @@ async function saveSettings() {
     coverr_key:      _q('coverr-key-input').value,
     music_provider:  _q('music-provider').value,
     jamendo_key:     _q('jamendo-key').value,
+    gemini_key:      _q('gemini-key').value,
+    replicate_key:   _q('replicate-key').value,
+    fal_key:         _q('fal-key').value,
   };
   if (fprimary    === 'pexels')   data.pexels_key  = primaryKeyVal;
   if (fprimary    === 'pixabay')  data.pixabay_key = primaryKeyVal;
@@ -192,6 +242,12 @@ async function saveSettings() {
   if (res.ok) {
     btn.textContent = '✓ Saved';
     btn.classList.replace('bg-accent', 'bg-green-500');
+    // Rare, once-per-visit confirmation — a small delight pop is within
+    // budget here in a way it wouldn't be on something seen daily.
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      btn.style.transform = 'scale(1.03)';
+      setTimeout(() => { btn.style.transform = ''; }, 160);
+    }
     setTimeout(() => {
       btn.textContent = 'Save settings';
       btn.classList.replace('bg-green-500', 'bg-accent');
@@ -223,7 +279,7 @@ function startConfig(mode) {
   const badge = _q('config-mode-badge');
   if (mode === 'guided') {
     badge.textContent = 'Guided Mode';
-    badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-[#0c2d42] text-sky-400';
+    badge.className = 'text-xs font-semibold px-3 py-1 rounded-full bg-[#10312d] text-teal-400';
     _q('topic-row').style.display = '';
   } else if (mode === 'short') {
     badge.textContent = 'Short / Reel Mode';
@@ -244,8 +300,11 @@ function startConfig(mode) {
   }
   _q('doc-duration-row').style.display = (mode === 'short' || mode === 'slideshow' || mode === 'clipstory') ? 'none' : '';
   _q('short-duration-row').style.display = mode === 'short' ? '' : 'none';
+  _q('footage-source-row').style.display = mode === 'short' ? '' : 'none';
+  if (mode === 'short') onFootageSourceChange(_q('shorts-footage-source-select').value);
   _q('aspect-row').style.display = mode === 'short' ? '' : 'none';
   _q('captions-row').style.display = mode === 'short' ? '' : 'none';
+  _q('caption-style-row').style.display = mode === 'short' ? '' : 'none';
   _q('music-row').style.display = mode === 'short' ? '' : 'none';
   _q('music-volume-row').style.display = mode === 'short' ? '' : 'none';
   _q('advanced-row').style.display = mode === 'short' ? '' : 'none';
@@ -257,7 +316,10 @@ function startConfig(mode) {
   _q('slideshow-vignette-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-grain-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-captions-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-caption-style-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('slideshow-music-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-music-volume-row').style.display = mode === 'slideshow' ? '' : 'none';
+  _q('slideshow-advanced-row').style.display = mode === 'slideshow' ? '' : 'none';
   _q('clipstory-topic-row').style.display = mode === 'clipstory' ? '' : 'none';
   _q('clipstory-canvas-row').style.display = mode === 'clipstory' ? '' : 'none';
   _q('clipstory-clips-row').style.display = mode === 'clipstory' ? '' : 'none';
@@ -288,15 +350,19 @@ async function browseClipStoryClips() {
     _clipStoryReview = {};
     _renderClipStoryReview();
   }
-  _renderClipStoryClips();
+  _renderClipStoryClips(meta.clips.length);
 }
 
-function _renderClipStoryClips() {
+function _renderClipStoryClips(newCount = 0) {
   const list = _q('clipstory-clip-list');
   list.innerHTML = '';
+  const firstNewIndex = _clipStoryClips.length - newCount;
   _clipStoryClips.forEach((clip, i) => {
     const row = document.createElement('div');
-    row.className = 'bg-input border border-border rounded-lg px-3 py-3 text-sm text-white';
+    const isNew = i >= firstNewIndex;
+    row.className = (isNew ? 'list-item-enter ' : '') +
+      'bg-input border border-border rounded-lg px-3 py-3 text-sm text-white';
+    if (isNew) row.style.animationDelay = Math.min((i - firstNewIndex) * 40, 400) + 'ms';
 
     const topRow = document.createElement('div');
     topRow.className = 'flex items-center gap-2';
@@ -484,16 +550,50 @@ async function browseSlideshowImages() {
   const paths = await window.pywebview.api.browse_images();
   if (paths && paths.length) {
     _slideshowImages = _slideshowImages.concat(paths);
-    _renderSlideshowImages();
+    _renderSlideshowImages(paths.length);
   }
 }
 
-function _renderSlideshowImages() {
+function _renderSlideshowImages(newCount = 0) {
   const list = _q('slideshow-image-list');
   list.innerHTML = '';
+  const firstNewIndex = _slideshowImages.length - newCount;
   _slideshowImages.forEach((path, i) => {
     const row = document.createElement('div');
-    row.className = 'flex items-center gap-2 bg-input border border-border rounded-lg px-3 py-2 text-sm text-white';
+    const isNew = i >= firstNewIndex;
+    row.className = (isNew ? 'list-item-enter ' : '') +
+      'flex items-center gap-2 bg-input border border-border rounded-lg px-3 py-2 text-sm text-white';
+    if (isNew) row.style.animationDelay = Math.min((i - firstNewIndex) * 40, 400) + 'ms';
+    row.style.transition = 'opacity 150ms var(--ease-out), transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out)';
+    // Drag-and-drop reordering to any position, in addition to the ↑/↓
+    // buttons below — the OS file-picker's multi-select order is not
+    // reliably the click order, so full manual reordering is the only way
+    // users get real control over final sequence.
+    row.draggable = true;
+    row.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(i));
+      row.style.opacity = '0.5';
+      row.style.transform = 'scale(1.02)';
+      row.style.boxShadow = '0 8px 20px -6px rgba(0,0,0,.5)';
+    });
+    row.addEventListener('dragend', () => {
+      row.style.opacity = '';
+      row.style.transform = '';
+      row.style.boxShadow = '';
+    });
+    row.addEventListener('dragover', (e) => e.preventDefault());
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      _reorderSlideshowImage(from, i);
+    });
+
+    const handle = document.createElement('span');
+    handle.className = 'text-faint cursor-grab select-none px-1';
+    handle.textContent = '⠿';
+    handle.title = 'Drag to reorder';
+    row.appendChild(handle);
 
     const thumb = document.createElement('img');
     thumb.src = _toFileUrl(path);
@@ -532,6 +632,15 @@ function _renderSlideshowImages() {
   _updateGenerateButtonState();
 }
 
+function _reorderSlideshowImage(fromIndex, toIndex) {
+  if (Number.isNaN(fromIndex) || fromIndex === toIndex) return;
+  if (fromIndex < 0 || fromIndex >= _slideshowImages.length) return;
+  if (toIndex < 0 || toIndex >= _slideshowImages.length) return;
+  const [moved] = _slideshowImages.splice(fromIndex, 1);
+  _slideshowImages.splice(toIndex, 0, moved);
+  _renderSlideshowImages();
+}
+
 function _moveSlideshowImage(i, delta) {
   const j = i + delta;
   if (j < 0 || j >= _slideshowImages.length) return;
@@ -561,7 +670,7 @@ async function fetchSlideshowTopicImages() {
     const res = await window.pywebview.api.fetch_slideshow_images(topic, count);
     if (res.ok) {
       _slideshowImages = _slideshowImages.concat(res.paths);
-      _renderSlideshowImages();
+      _renderSlideshowImages(res.paths.length);
       status.textContent = res.message || '';
     } else {
       status.textContent = 'Failed to fetch images: ' + (res.error || '');
@@ -623,11 +732,17 @@ function updateShortsDurationHint() {
   _q('shorts-duration-label').textContent = secs + ' s';
   const words = Math.round((secs / 60) * 170);
   _q('shorts-duration-hint').textContent = `Target: ${secs}s ≈ ${words} words of narration`;
+  if (_q('shorts-footage-source-select').value === 'ai_image') _updateAiImageCostEstimate();
 }
 
 function updateMusicVolumeLabel() {
   const db = parseInt(_q('music-volume-slider').value);
   _q('music-volume-label').textContent = db + ' dB';
+}
+
+function updateSlideshowMusicVolumeLabel() {
+  const db = parseInt(_q('slideshow-music-volume-slider').value);
+  _q('slideshow-music-volume-label').textContent = db + ' dB';
 }
 
 async function startRun() {
@@ -679,9 +794,13 @@ async function startRun() {
       vignette: _q('slideshow-vignette-toggle').checked,
       grain: _q('slideshow-grain-toggle').checked,
       captions: _q('slideshow-captions-toggle').checked,
+      caption_style: _q('slideshow-caption-style-select').value,
       music_enabled: _q('slideshow-music-toggle').checked,
       music_provider: _q('slideshow-music-provider-select').value,
       music_folder: _q('slideshow-music-folder').value,
+      music_volume_db: parseInt(_q('slideshow-music-volume-slider').value),
+      loop_revisit_enabled: _q('slideshow-loop-revisit-toggle').checked,
+      cinematic_ending_enabled: _q('slideshow-cinematic-ending-toggle').checked,
     });
     if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
     return;
@@ -698,14 +817,18 @@ async function startRun() {
     startPolling();
     const res = await window.pywebview.api.start_shorts_run({
       topic, duration_seconds: secs,
+      footage_source: _q('shorts-footage-source-select').value,
+      ai_image_model: _q('shorts-ai-image-model-select').value,
+      ai_story_continuity: _q('ai-story-continuity-toggle').checked,
       aspect_ratio: _q('shorts-aspect-select').value,
       captions_enabled: _q('captions-toggle').checked,
+      caption_style: _q('caption-style-select').value,
       music_enabled: _q('music-toggle').checked,
       music_volume_db: parseInt(_q('music-volume-slider').value),
       beat_sync_enabled: _q('beat-sync-toggle').checked,
       speed_ramp_enabled: _q('speed-ramp-toggle').checked,
-      punch_enabled: _q('punch-toggle').checked,
       loop_revisit_enabled: _q('loop-revisit-toggle').checked,
+      cinematic_ending_enabled: _q('cinematic-ending-toggle').checked,
     });
     if (!res.ok) appendLog('Failed to start: ' + (res.error || ''), 'error');
     return;
@@ -761,17 +884,20 @@ function _setStage(i, state) {
   const prefix = _runMode === 'short' ? 'short-stage-' : _runMode === 'slideshow' ? 'slideshow-stage-' : _runMode === 'clipstory' ? 'clipstory-stage-' : 'stage-';
   const el = _q(prefix + i);
   if (!el) return;
-  const base = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ';
+  // stage-pill stays present across every state so the color/border swap
+  // below transitions instead of snapping; is-active adds a small state-
+  // indication scale bump only while this stage is the current one.
+  const base = 'stage-pill flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ';
   const styles = {
     pending:  base + 'bg-[#2e313a] text-[#7a8099] border-[#383b45]',
-    active:   base + 'bg-[#0c2d42] text-sky-400 border-sky-400',
+    active:   base + 'bg-[#10312d] text-teal-400 border-teal-400 is-active',
     complete: base + 'bg-[#052e16] text-green-400 border-green-500',
     error:    base + 'bg-[#2d0a0a] text-red-400 border-red-500',
   };
   el.className = styles[state] || styles.pending;
   const dot = el.querySelector('.stage-dot');
   if (dot) {
-    const dc = { pending:'bg-[#7a8099]', active:'bg-sky-400 animate-pulse',
+    const dc = { pending:'bg-[#7a8099]', active:'bg-teal-400 animate-pulse',
                  complete:'bg-green-400', error:'bg-red-400' };
     dot.className = 'stage-dot w-2 h-2 rounded-full ' + (dc[state] || dc.pending);
   }
@@ -780,8 +906,9 @@ function _setStage(i, state) {
 function appendLog(text, type = 'info') {
   const area = _q('log-area');
   const d = document.createElement('div');
-  d.className = { info:'text-[#b0b8d0]', success:'text-green-400',
+  const color = { info:'text-[#b0b8d0]', success:'text-green-400',
                   error:'text-red-400',   warning:'text-amber-400' }[type] || 'text-[#b0b8d0]';
+  d.className = 'log-line ' + color;
   d.textContent = text;
   area.appendChild(d);
   area.scrollTop = area.scrollHeight;
@@ -896,6 +1023,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (shortsDur) shortsDur.addEventListener('input', updateShortsDurationHint);
   const musicVol = _q('music-volume-slider');
   if (musicVol) musicVol.addEventListener('input', updateMusicVolumeLabel);
+  const slideshowMusicVol = _q('slideshow-music-volume-slider');
+  if (slideshowMusicVol) slideshowMusicVol.addEventListener('input', updateSlideshowMusicVolumeLabel);
   // Wire cancel button
   _q('cancel-btn').addEventListener('click', cancelRun);
   // Init provider models
