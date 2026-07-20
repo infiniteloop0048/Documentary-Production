@@ -87,6 +87,7 @@ class Bridge:
             "llm_provider":     getattr(s, "llm_provider",     "Anthropic"),
             "llm_model":        getattr(s, "llm_model",        "claude-sonnet-4-5"),
             "llm_custom_model": getattr(s, "llm_custom_model", ""),
+            "llm_reasoning_enabled": getattr(s, "llm_reasoning_enabled", False),
             "tts_provider":    tts_provider,
             "deepgram_voice":  getattr(s, "deepgram_voice",  "aura-asteria-en"),
             "output_folder":   str(getattr(s, "output_folder", Path.home() / "DocuStudio")),
@@ -107,6 +108,9 @@ class Bridge:
             "coverr_key":      key_cache.get("docu_studio_coverr"),
             "serper_key":      key_cache.get("docu_studio_serper"),
             "jamendo_key":     key_cache.get("docu_studio_jamendo"),
+            "gemini_key":      key_cache.get("docu_studio_gemini"),
+            "replicate_key":   key_cache.get("docu_studio_replicate"),
+            "fal_key":         key_cache.get("docu_studio_fal"),
         }
 
     def save_settings(self, data: dict) -> dict:
@@ -115,6 +119,7 @@ class Bridge:
             s.llm_provider     = data.get("llm_provider",     "Anthropic")
             s.llm_model        = data.get("llm_model",        "claude-sonnet-4-5")
             s.llm_custom_model = data.get("llm_custom_model", "")
+            s.llm_reasoning_enabled = bool(data.get("llm_reasoning_enabled", False))
             s.tts_provider    = data.get("tts_provider",    "elevenlabs")
             s.deepgram_voice  = data.get("deepgram_voice",  "aura-asteria-en")
             s.narration_wpm   = int(data.get("wpm", 150))
@@ -140,6 +145,9 @@ class Bridge:
                     "docu_studio_coverr":       data.get("coverr_key",     ""),
                     "docu_studio_serper":       data.get("serper_key",     ""),
                     "docu_studio_jamendo":      data.get("jamendo_key",    ""),
+                    "docu_studio_gemini":       data.get("gemini_key",    ""),
+                    "docu_studio_replicate":    data.get("replicate_key", ""),
+                    "docu_studio_fal":          data.get("fal_key",       ""),
                 }.items():
                     if val is not None:
                         key_cache.set_key(svc, val)
@@ -180,7 +188,10 @@ class Bridge:
             pixabay_key = key_cache.get("docu_studio_pixabay")
             coverr_key  = key_cache.get("docu_studio_coverr")
 
-            llm = build_llm(provider, llm_key, model)
+            llm = build_llm(
+                provider, llm_key, model,
+                reasoning_enabled=getattr(s, "llm_reasoning_enabled", False),
+            )
             tts = build_tts(
                 tts_prov, tts_key or "",
                 getattr(s, "deepgram_voice", "aura-asteria-en"),
@@ -249,9 +260,14 @@ class Bridge:
         try:
             self._active_mode = "shorts"
             from docu_studio.adapters.footage.factory import build_footage_providers
+            from docu_studio.adapters.photos.factory import build_photo_providers
             from docu_studio.adapters.llm.factory import build_llm
             from docu_studio.adapters.tts.factory import build_tts
-            from docu_studio.shorts.shorts_config import SHORTS_DEFAULT_MUSIC_VOLUME_DB
+            from docu_studio.common.captions import DEFAULT_CAPTION_STYLE
+            from docu_studio.shorts.shorts_config import (
+                SHORTS_DEFAULT_AI_IMAGE_MODEL,
+                SHORTS_DEFAULT_MUSIC_VOLUME_DB,
+            )
             from docu_studio.shorts.shorts_runner import ShortsRunner
 
             s = self._settings
@@ -274,7 +290,10 @@ class Bridge:
             pixabay_key = key_cache.get("docu_studio_pixabay")
             coverr_key  = key_cache.get("docu_studio_coverr")
 
-            llm = build_llm(provider, llm_key, model)
+            llm = build_llm(
+                provider, llm_key, model,
+                reasoning_enabled=getattr(s, "llm_reasoning_enabled", False),
+            )
             tts_voice = getattr(s, "deepgram_voice", "aura-asteria-en")
             tts = build_tts(tts_prov, tts_key or "", tts_voice)
             footage_list = build_footage_providers(
@@ -285,6 +304,24 @@ class Bridge:
                 coverr_key  or "",
                 fallback2=getattr(s, "footage_fallback2", "none"),
             )
+            footage_source = config.get("footage_source", "video")
+            photo_list = (
+                build_photo_providers(pexels_key or "", pixabay_key or "")
+                if footage_source in ("image", "ai_image") else []
+            )
+
+            image_gen_provider = None
+            ai_image_model = config.get("ai_image_model", SHORTS_DEFAULT_AI_IMAGE_MODEL)
+            ai_story_continuity = config.get("ai_story_continuity", True)
+            gemini_key = key_cache.get("docu_studio_gemini")
+            replicate_key = key_cache.get("docu_studio_replicate")
+            fal_key = key_cache.get("docu_studio_fal")
+            if footage_source == "ai_image":
+                from docu_studio.adapters.image_gen.factory import build_image_gen_provider
+                image_gen_provider = build_image_gen_provider(
+                    ai_image_model, key_cache.get("docu_studio_openai") or "",
+                    gemini_key or "", replicate_key or "", fal_key or "",
+                )
 
             while not self._event_q.empty():
                 try:
@@ -300,12 +337,13 @@ class Bridge:
             duration_seconds = int(config.get("duration_seconds", 30))
             aspect_ratio = config.get("aspect_ratio", "9:16")
             captions_enabled = bool(config.get("captions_enabled", True))
+            caption_style = config.get("caption_style", DEFAULT_CAPTION_STYLE)
             music_enabled = bool(config.get("music_enabled", True))
             music_volume_db = float(config.get("music_volume_db", SHORTS_DEFAULT_MUSIC_VOLUME_DB))
             beat_sync_enabled = bool(config.get("beat_sync_enabled", True))
             speed_ramp_enabled = bool(config.get("speed_ramp_enabled", True))
-            punch_enabled = bool(config.get("punch_enabled", True))
             loop_revisit_enabled = bool(config.get("loop_revisit_enabled", True))
+            cinematic_ending_enabled = bool(config.get("cinematic_ending_enabled", True))
             music_provider = getattr(s, "music_provider", "local")
             jamendo_client_id = key_cache.get("docu_studio_jamendo") or ""
 
@@ -315,13 +353,18 @@ class Bridge:
                 llm=llm,
                 tts=tts,
                 footage_providers=footage_list,
+                photo_providers=photo_list,
+                image_gen_provider=image_gen_provider,
+                ai_image_model=ai_image_model,
+                ai_story_continuity=ai_story_continuity,
                 output_base=output_base,
                 captions_enabled=captions_enabled,
+                caption_style=caption_style,
                 music_enabled=music_enabled,
                 music_volume_db=music_volume_db,
                 sensitive_keys=[
                     v for v in [llm_key, tts_key, pexels_key, pixabay_key, coverr_key,
-                                jamendo_client_id] if v
+                                jamendo_client_id, gemini_key, replicate_key, fal_key] if v
                 ],
                 tts_provider=tts_prov,
                 tts_voice=tts_voice,
@@ -329,9 +372,10 @@ class Bridge:
                 jamendo_client_id=jamendo_client_id,
                 beat_sync_enabled=beat_sync_enabled,
                 speed_ramp_enabled=speed_ramp_enabled,
-                punch_enabled=punch_enabled,
                 loop_revisit_enabled=loop_revisit_enabled,
+                cinematic_ending_enabled=cinematic_ending_enabled,
                 aspect_ratio=aspect_ratio,
+                footage_source=footage_source,
             )
 
             def _run() -> None:
@@ -359,6 +403,8 @@ class Bridge:
         try:
             self._active_mode = "slideshow"
             from docu_studio.adapters.tts.factory import build_tts
+            from docu_studio.common.captions import DEFAULT_CAPTION_STYLE
+            from docu_studio.slideshow.slideshow_config import SLIDESHOW_DEFAULT_MUSIC_VOLUME_DB
             from docu_studio.slideshow.slideshow_runner import SlideshowRunner
 
             s = self._settings
@@ -394,10 +440,14 @@ class Bridge:
                 vignette=bool(config.get("vignette", False)),
                 grain=bool(config.get("grain", False)),
                 captions=bool(config.get("captions", False)),
+                caption_style=config.get("caption_style", DEFAULT_CAPTION_STYLE),
                 music_enabled=bool(config.get("music_enabled", False)),
                 music_provider=config.get("music_provider", "jamendo"),
                 music_folder=config.get("music_folder", ""),
                 jamendo_client_id=jamendo_client_id,
+                music_volume_db=float(config.get("music_volume_db", SLIDESHOW_DEFAULT_MUSIC_VOLUME_DB)),
+                loop_revisit_enabled=bool(config.get("loop_revisit_enabled", True)),
+                cinematic_ending_enabled=bool(config.get("cinematic_ending_enabled", True)),
             )
 
             def _run() -> None:
@@ -539,7 +589,10 @@ class Bridge:
                 "Groq": key_cache.get("docu_studio_groq"),
             }
             llm_key = key_map.get(provider, "") or ""
-            llm = build_llm(provider, llm_key, model)
+            llm = build_llm(
+                provider, llm_key, model,
+                reasoning_enabled=getattr(s, "llm_reasoning_enabled", False),
+            )
 
             script_text = _generate_slideshow_script(topic, int(image_count), llm)
             return {"ok": True, "script_text": script_text}
@@ -567,7 +620,10 @@ class Bridge:
                 "Groq": key_cache.get("docu_studio_groq"),
             }
             llm_key = key_map.get(provider, "") or ""
-            llm = build_llm(provider, llm_key, model)
+            llm = build_llm(
+                provider, llm_key, model,
+                reasoning_enabled=getattr(s, "llm_reasoning_enabled", False),
+            )
 
             tts_prov = getattr(s, "tts_provider", "elevenlabs")
             tts_voice = getattr(s, "deepgram_voice", "aura-asteria-en")
