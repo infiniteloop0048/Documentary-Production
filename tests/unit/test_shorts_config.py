@@ -5,9 +5,12 @@ import pytest
 
 from docu_studio.shorts.shorts_config import (
     SHORTS_ASPECT_DIMENSIONS,
+    SHORTS_DEFAULT_AI_IMAGE_MODEL,
     SHORTS_DEFAULT_ASPECT,
     SHORTS_DEFAULT_DURATION,
+    SHORTS_DEFAULT_FOOTAGE_SOURCE,
     SHORTS_DEFAULT_MUSIC_VOLUME_DB,
+    SHORTS_FOOTAGE_SOURCES,
     SHORTS_HEIGHT,
     SHORTS_MAX_DURATION,
     SHORTS_MIN_DURATION,
@@ -44,14 +47,12 @@ class TestShortsConfig:
         cfg = ShortsConfig(topic="x")
         assert cfg.beat_sync_enabled is True
         assert cfg.speed_ramp_enabled is True
-        assert cfg.punch_enabled is True
         assert cfg.loop_revisit_enabled is True
 
     def test_feature_toggles_can_be_disabled_individually(self) -> None:
-        cfg = ShortsConfig(topic="x", beat_sync_enabled=False, punch_enabled=False)
+        cfg = ShortsConfig(topic="x", beat_sync_enabled=False, speed_ramp_enabled=False)
         assert cfg.beat_sync_enabled is False
-        assert cfg.speed_ramp_enabled is True
-        assert cfg.punch_enabled is False
+        assert cfg.speed_ramp_enabled is False
         assert cfg.loop_revisit_enabled is True
 
 
@@ -78,6 +79,53 @@ class TestShortsAspectRatio:
 
     def test_default_aspect_dimensions_match_legacy_constants(self) -> None:
         assert SHORTS_ASPECT_DIMENSIONS[SHORTS_DEFAULT_ASPECT] == (SHORTS_WIDTH, SHORTS_HEIGHT)
+
+
+class TestShortsFootageSource:
+    def test_default_footage_source_is_video(self) -> None:
+        cfg = ShortsConfig(topic="x")
+        assert cfg.footage_source == SHORTS_DEFAULT_FOOTAGE_SOURCE == "video"
+
+    def test_accepts_image_footage_source(self) -> None:
+        cfg = ShortsConfig(topic="x", footage_source="image")
+        assert cfg.footage_source == "image"
+
+    def test_unknown_footage_source_raises(self) -> None:
+        with pytest.raises(ValueError, match="footage_source"):
+            ShortsConfig(topic="x", footage_source="audio")
+
+    def test_all_known_footage_sources_present(self) -> None:
+        assert set(SHORTS_FOOTAGE_SOURCES) == {"video", "image", "ai_image"}
+
+
+class TestShortsAiImageSource:
+    def test_ai_image_is_a_known_footage_source(self) -> None:
+        assert "ai_image" in SHORTS_FOOTAGE_SOURCES
+
+    def test_accepts_ai_image_footage_source(self) -> None:
+        cfg = ShortsConfig(topic="x", footage_source="ai_image")
+        assert cfg.footage_source == "ai_image"
+
+    def test_ai_image_model_defaults_to_a_known_preset(self) -> None:
+        from docu_studio.adapters.image_gen.factory import IMAGE_GEN_PRESETS
+        cfg = ShortsConfig(topic="x")
+        assert cfg.ai_image_model == SHORTS_DEFAULT_AI_IMAGE_MODEL
+        assert cfg.ai_image_model in IMAGE_GEN_PRESETS
+
+    def test_accepts_any_known_preset(self) -> None:
+        ShortsConfig(topic="x", footage_source="ai_image", ai_image_model="fal_flux_schnell")
+
+    def test_rejects_unknown_preset(self) -> None:
+        with pytest.raises(ValueError, match="ai_image_model"):
+            ShortsConfig(topic="x", footage_source="ai_image", ai_image_model="not_a_real_preset")
+
+    def test_story_continuity_defaults_to_true(self) -> None:
+        cfg = ShortsConfig(topic="x")
+        assert cfg.ai_story_continuity is True
+
+    def test_story_continuity_can_be_disabled(self) -> None:
+        cfg = ShortsConfig(topic="x", ai_story_continuity=False)
+        assert cfg.ai_story_continuity is False
 
 
 class TestShortsMusicVolume:
