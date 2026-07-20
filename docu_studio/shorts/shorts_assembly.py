@@ -8,8 +8,12 @@ import math
 import queue
 from pathlib import Path
 
+from urllib.parse import urlparse
+
 from docu_studio.adapters.footage.base import FootageClip, FootageProvider
-from docu_studio.common.captions import write_ass_file
+from docu_studio.adapters.image_gen.base import ImageGenProvider
+from docu_studio.adapters.photos.base import PhotoProvider, PhotoResult
+from docu_studio.common.captions import DEFAULT_CAPTION_STYLE, write_ass_file
 from docu_studio.common.resilient_download import (
     build_download_session,
     download_resilient,
@@ -17,8 +21,10 @@ from docu_studio.common.resilient_download import (
 from docu_studio.pipeline.events import LogEvent, LogLevel, ProgressEvent
 from docu_studio.pipeline.stages.footage_assembly import download_clip
 from docu_studio.shorts.capability_resolvers import WordTiming, resolve_beat_grid
+from docu_studio.slideshow.slideshow_motion import direction_for_index
 from docu_studio.shorts.shorts_config import (
     SHORTS_DEFAULT_MUSIC_VOLUME_DB,
+    SHORTS_ENDING_HOLD_SECONDS,
     SHORTS_HEIGHT,
     SHORTS_WIDTH,
 )
@@ -31,7 +37,6 @@ from docu_studio.shorts.shorts_cuts import (
 )
 from docu_studio.shorts.shorts_sentence_cuts import (
     apply_loop_revisit,
-    insert_punch_card_scoped,
     plan_sentence_scoped_cuts,
 )
 from docu_studio.shorts.shorts_sentence_spans import sentence_spans
@@ -62,9 +67,6 @@ _SLOW_CLIP_MIN_SOURCE_DURATION = 15.0
 SPEED_RAMP_FACTOR = 1.35
 _MIN_SPEED_FACTOR = 1.25
 _LOOP_REVISIT_MIN_GAP = 1.0
-PUNCH_CARD_DURATION_SECONDS = 1.0
-_PUNCH_CARD_MIN_DURATION = 0.8
-_MIN_PUNCH_REMAINDER = 0.3
 
 
 def _dedup_key(clip: FootageClip) -> str:
@@ -218,7 +220,7 @@ def _collect_clips_per_sentence(
         for url, width, height in raw:
             path = path_by_url.get(url)
             if path is not None:
-                out.append({"path": path, "width": width, "height": height})
+                out.append({"path": path, "width": width, "height": height, "kind": "video"})
         return out
 
     per_sentence_pools = [_to_dicts(pool) for pool in raw_pools]
@@ -230,6 +232,228 @@ def _collect_clips_per_sentence(
     event_queue.put(LogEvent(
         message=f"Shorts footage: {len(path_by_url)} clips downloaded across "
                 f"{len(script.sentences)} sentence pools (+{len(fallback_pool)} fallback).",
+        level=LogLevel.INFO,
+    ))
+    return per_sentence_pools, fallback_pool
+
+
+def _photo_dedup_key(photo: PhotoResult) -> str:
+    """Prefer the provider's stable photo_id over url — mirrors _dedup_key's
+    reasoning for video clips: the same underlying photo can come back with
+    a different URL (different size variant) across separate search calls."""
+    return photo.photo_id if photo.photo_id else photo.url
+
+
+def _search_one_photo_query(
+    providers: list[PhotoProvider], query: str, max_per_query: int,
+) -> list[PhotoResult]:
+    """Fan out *query* across photo *providers* in order, stopping at the
+    first provider that returns any results, capped to *max_per_query*
+    candidates. Mirrors _search_one_query's video equivalent."""
+    for provider in providers:
+        try:
+            photos = provider.search(query, page=1)
+        except Exception as exc:
+            _log.info(
+                "_search_one_photo_query: query=%r provider=%s raised %s — trying next provider",
+                query, type(provider).__name__, exc,
+            )
+            continue
+        candidates = photos[:max_per_query]
+        _log.info(
+            "_search_one_photo_query: query=%r provider=%s returned=%d capped_to=%d",
+            query, type(provider).__name__, len(photos), len(candidates),
+        )
+        if photos:
+            return candidates
+    return []
+
+
+def _collect_images_per_sentence(
+    script: ShortsScript, providers: list[PhotoProvider], scene_dir: Path,
+    event_queue: queue.Queue,
+) -> tuple[list[list[dict]], list[dict]]:
+    """Image-mode counterpart to _collect_clips_per_sentence: fetch and
+    download a per-sentence photo pool (own query, own candidate pool, same
+    cross-sentence clip_id/photo_id dedup) plus a topic-level fallback pool,
+    keeping the exact same shape and fallback semantics so the rest of
+    assemble_short (pool resolution, plan_cuts, segment loop) needs no
+    awareness of which mode produced the pools. No min_duration filter —
+    photos have no duration.
+
+    Returns (per_sentence_pools, fallback_pool): per_sentence_pools[i] lines
+    up with script.sentences[i]; each pool entry is
+    {path, width, height, kind: "image"}.
+    """
+    _log.info("_collect_images_per_sentence: per-sentence pool collection active")
+    seen: dict[str, tuple[str, int, int]] = {}
+    raw_pools: list[list[tuple[str, int, int]]] = []
+    for i, query in enumerate(script.visual_queries):
+        candidates = _search_one_photo_query(providers, query, _MAX_CANDIDATES_PER_QUERY)
+        pool: list[tuple[str, int, int]] = []
+        for photo in candidates:
+            key = _photo_dedup_key(photo)
+            if key in seen:
+                continue
+            entry = (photo.url, photo.width, photo.height)
+            seen[key] = entry
+            pool.append(entry)
+        _log.info(
+            "_collect_images_per_sentence: sentence %d query=%r pool_size=%d", i, query, len(pool),
+        )
+        raw_pools.append(pool)
+
+    topic_query = script.visual_queries[0] if script.visual_queries else "documentary photo"
+    fallback_candidates = _search_one_photo_query(
+        providers, topic_query, _MAX_CANDIDATES_PER_QUERY * 2,
+    )
+    fallback_raw: list[tuple[str, int, int]] = []
+    for photo in fallback_candidates:
+        key = _photo_dedup_key(photo)
+        entry = seen.get(key, (photo.url, photo.width, photo.height))
+        seen.setdefault(key, entry)
+        fallback_raw.append(entry)
+    _log.info("_collect_images_per_sentence: topic-level fallback pool_size=%d", len(fallback_raw))
+
+    unique_order: list[str] = []
+    unique_seen: set[str] = set()
+    for pool in raw_pools + [fallback_raw]:
+        for url, _w, _h in pool:
+            if url not in unique_seen:
+                unique_seen.add(url)
+                unique_order.append(url)
+
+    download_session = build_download_session()
+    last_request_at: dict[str, float] = {}
+    path_by_url: dict[str, str] = {}
+    for i, url in enumerate(unique_order):
+        ext = Path(urlparse(url).path).suffix or ".jpg"
+        dest = str(scene_dir / f"short_img_{i:03d}{ext}")
+        try:
+            download_resilient(download_session, url, dest, last_request_at)
+        except Exception as exc:
+            _log.info("_collect_images_per_sentence: download failed for %s (%s) — skipping", url, exc)
+            continue
+        path_by_url[url] = dest
+
+    def _to_dicts(raw: list[tuple[str, int, int]]) -> list[dict]:
+        out = []
+        for url, width, height in raw:
+            path = path_by_url.get(url)
+            if path is not None:
+                out.append({"path": path, "width": width, "height": height, "kind": "image"})
+        return out
+
+    per_sentence_pools = [_to_dicts(pool) for pool in raw_pools]
+    fallback_pool = _to_dicts(fallback_raw)
+
+    if not any(per_sentence_pools) and not fallback_pool:
+        raise RuntimeError("Shorts assembly: no images found for any sentence.")
+
+    event_queue.put(LogEvent(
+        message=f"Shorts images: {len(path_by_url)} images downloaded across "
+                f"{len(script.sentences)} sentence pools (+{len(fallback_pool)} fallback).",
+        level=LogLevel.INFO,
+    ))
+    return per_sentence_pools, fallback_pool
+
+
+def _collect_ai_images_per_sentence(
+    script: ShortsScript,
+    image_gen_provider: ImageGenProvider,
+    photo_providers: list[PhotoProvider],
+    scene_dir: Path,
+    output_dimensions: tuple[int, int],
+    event_queue: queue.Queue,
+) -> tuple[list[list[dict]], list[dict]]:
+    """AI-image counterpart to _collect_images_per_sentence: generate one AI
+    image per sentence from script.image_prompts[i]; on generation failure,
+    fall back to a single stock-photo search using script.visual_queries[i]
+    (the existing stock-photo safety-net infra), logging the fallback so the
+    user can see it happened. Every successful pool entry — AI-generated or
+    stock-fallback — is tagged "kind": "image" so _build_segment's existing
+    image branch needs no changes. Returns (per_sentence_pools, fallback_pool)
+    in the exact shape assemble_short's pool-resolution logic already expects.
+    fallback_pool is built once via a stock-photo search (not a second AI
+    generation) as the rare safety net for sentences where both AI generation
+    and the per-sentence stock fallback failed — this avoids spending
+    image-generation budget on a fallback that's usually never used.
+    """
+    out_width, out_height = output_dimensions
+    session = build_download_session()
+    last_request_at: dict[str, float] = {}
+    per_sentence_pools: list[list[dict]] = []
+    generated_count = 0
+
+    for i, image_prompt in enumerate(script.image_prompts):
+        dest = str(scene_dir / f"ai_img_{i:03d}.png")
+        try:
+            image_bytes = image_gen_provider.generate(image_prompt, out_width, out_height)
+            Path(dest).write_bytes(image_bytes)
+            per_sentence_pools.append(
+                [{"path": dest, "width": out_width, "height": out_height, "kind": "image"}]
+            )
+            generated_count += 1
+            _log.info("_collect_ai_images_per_sentence: sentence %d generated via AI", i)
+            continue
+        except Exception as exc:
+            _log.warning(
+                "_collect_ai_images_per_sentence: AI generation failed for sentence %d (%s) — "
+                "falling back to stock photo", i, exc,
+            )
+
+        query = script.visual_queries[i]
+        candidates = _search_one_photo_query(photo_providers, query, 1)
+        if not candidates:
+            per_sentence_pools.append([])
+            event_queue.put(LogEvent(
+                message=f"Sentence {i}: AI image generation failed and no stock photo "
+                        "fallback was found.",
+                level=LogLevel.WARNING,
+            ))
+            continue
+
+        photo = candidates[0]
+        ext = Path(urlparse(photo.url).path).suffix or ".jpg"
+        stock_dest = str(scene_dir / f"ai_img_{i:03d}_stock{ext}")
+        try:
+            download_resilient(session, photo.url, stock_dest, last_request_at)
+            per_sentence_pools.append(
+                [{"path": stock_dest, "width": photo.width, "height": photo.height, "kind": "image"}]
+            )
+            event_queue.put(LogEvent(
+                message=f"Sentence {i}: AI image generation failed — used a stock photo instead.",
+                level=LogLevel.WARNING,
+            ))
+        except Exception as exc:
+            _log.warning(
+                "_collect_ai_images_per_sentence: stock fallback download failed for "
+                "sentence %d (%s)", i, exc,
+            )
+            per_sentence_pools.append([])
+
+    fallback_pool: list[dict] = []
+    topic_query = script.visual_queries[0] if script.visual_queries else "documentary photo"
+    fallback_candidates = _search_one_photo_query(
+        photo_providers, topic_query, _MAX_CANDIDATES_PER_QUERY,
+    )
+    for j, photo in enumerate(fallback_candidates):
+        ext = Path(urlparse(photo.url).path).suffix or ".jpg"
+        dest = str(scene_dir / f"ai_img_fallback_{j:03d}{ext}")
+        try:
+            download_resilient(session, photo.url, dest, last_request_at)
+            fallback_pool.append({"path": dest, "width": photo.width, "height": photo.height, "kind": "image"})
+        except Exception as exc:
+            _log.info("_collect_ai_images_per_sentence: fallback download failed for %s (%s)", photo.url, exc)
+
+    if not any(per_sentence_pools) and not fallback_pool:
+        raise RuntimeError(
+            "Shorts assembly: no AI-generated or stock fallback images available for any sentence."
+        )
+
+    event_queue.put(LogEvent(
+        message=f"Shorts AI images: {generated_count} of {len(script.sentences)} sentences "
+                f"generated by AI (+{len(fallback_pool)} fallback).",
         level=LogLevel.INFO,
     ))
     return per_sentence_pools, fallback_pool
@@ -344,6 +568,13 @@ def _build_segment(
 
     Returns (kenburns_output_path, updated_sped_count, window_start_used).
     """
+    if clip.get("kind") == "image":
+        direction = direction_for_index(seg.index)
+        kenburns = str(scene_dir / f"seg_{seg.index:03d}_kb.mp4")
+        ffmpeg.apply_ken_burns_image(clip["path"], kenburns, seg.duration, direction, *output_dimensions)
+        _log.info("Segment %d: image clip=%s direction=%s", seg.index, clip["path"], direction)
+        return kenburns, sped_count, 0.0
+
     raw_duration = ffmpeg.get_duration(clip["path"])
     window = min(seg.duration, raw_duration)
     start, method = ffmpeg.detect_motion_window(clip["path"], raw_duration, window)
@@ -409,72 +640,6 @@ def _build_segment(
     return kenburns, sped_count, start
 
 
-def _insert_punch_card(
-    segments: list[Segment],
-    punch: tuple[int, str],
-    sentence_starts: list[float],
-) -> tuple[list[Segment], tuple[float, float] | None]:
-    """Insert a punch-card Segment near *punch*'s sentence start, stealing
-    its duration from the nearest non-revisit footage segment so total
-    timeline length is unchanged. Returns (segments, (card_start, card_end))
-    on success, or (segments unchanged, None) if placement isn't possible
-    (out-of-range sentence index, no footage segments, or the nearest
-    segment is too short to steal PUNCH_CARD_DURATION_SECONDS from)."""
-    sentence_index, punch_text = punch
-    if sentence_index >= len(sentence_starts):
-        return segments, None
-    card_time = sentence_starts[sentence_index]
-
-    footage_segments = [s for s in segments if not s.loop_revisit]
-    if not footage_segments:
-        return segments, None
-    target = min(footage_segments, key=lambda s: abs(s.start - card_time))
-
-    card_duration = min(PUNCH_CARD_DURATION_SECONDS, target.duration - _MIN_PUNCH_REMAINDER)
-    if card_duration < _PUNCH_CARD_MIN_DURATION:
-        return segments, None  # target too short to steal a usable card from — skip
-
-    steal_from_start = target.index != 0
-    if steal_from_start:
-        card_start = target.start
-        new_target = Segment(
-            index=target.index, start=target.start + card_duration,
-            duration=target.duration - card_duration, clip_index=target.clip_index,
-        )
-    else:
-        card_start = target.start + target.duration - card_duration
-        new_target = Segment(
-            index=target.index, start=target.start,
-            duration=target.duration - card_duration, clip_index=target.clip_index,
-        )
-
-    card_segment = Segment(
-        index=target.index, start=card_start, duration=card_duration,
-        clip_index=0, is_punch=True, punch_text=punch_text,
-    )
-
-    new_segments: list[Segment] = []
-    for s in segments:
-        if s is target:
-            if steal_from_start:
-                new_segments.append(card_segment)
-                new_segments.append(new_target)
-            else:
-                new_segments.append(new_target)
-                new_segments.append(card_segment)
-        else:
-            new_segments.append(s)
-
-    reindexed = [
-        Segment(
-            index=i, start=s.start, duration=s.duration, clip_index=s.clip_index,
-            loop_revisit=s.loop_revisit, is_punch=s.is_punch, punch_text=s.punch_text,
-        )
-        for i, s in enumerate(new_segments)
-    ]
-    return reindexed, (card_start, card_start + card_duration)
-
-
 def assemble_short(
     script: ShortsScript,
     audio_path: str,
@@ -488,32 +653,54 @@ def assemble_short(
     seed: int,
     event_queue: queue.Queue,
     captions_enabled: bool = True,
+    caption_style: str = DEFAULT_CAPTION_STYLE,
     music_enabled: bool = True,
     music_volume_db: float = SHORTS_DEFAULT_MUSIC_VOLUME_DB,
     music_provider: str = "local",
     jamendo_client_id: str = "",
     beat_sync_enabled: bool = True,
     speed_ramp_enabled: bool = True,
-    punch_enabled: bool = True,
     loop_revisit_enabled: bool = True,
+    cinematic_ending_enabled: bool = True,
     output_dimensions: tuple[int, int] = (SHORTS_WIDTH, SHORTS_HEIGHT),
+    footage_source: str = "video",
+    photo_providers: list[PhotoProvider] | None = None,
+    image_gen_provider: ImageGenProvider | None = None,
 ) -> None:
     """Build the final vertical short: fetch each sentence's own footage
-    pool, resolve music (early, so its bpm is available for beat-sync),
+    pool (stock clips when *footage_source* is "video", stock photos when
+    "image"), resolve music (early, so its bpm is available for beat-sync),
     derive sentence time-spans from the measured word timing, plan cuts
     sentence-by-sentence (never mixing a sentence's segments with another
     sentence's footage), window/convert/Ken-Burns each segment (with
-    optional speed ramp and loop-revisit alternate window), insert an
-    optional sentence-scoped punch card, concat, caption, mix, and mux with
-    the TTS audio track. Every optional feature degrades silently to prior
-    behavior on failure — this function never raises for a feature-specific
-    error."""
+    optional speed ramp and loop-revisit alternate window — speed ramp is a
+    no-op and loop-revisit skips its alternate-window trick for image
+    segments, since a still has no source motion/extra duration to draw on),
+    concat, caption, mix, and mux with the TTS audio track. If
+    *cinematic_ending_enabled*, the last built segment's final frame is held
+    for SHORTS_ENDING_HOLD_SECONDS after concat (video/music continue,
+    narration silent, no new captions since there are no more words) instead
+    of cutting hard the instant the voiceover ends. Every optional feature
+    degrades silently to prior behavior on failure — this function never
+    raises for a feature-specific error."""
     scene_dir = project_folder / "video"
     scene_dir.mkdir(exist_ok=True)
-    _log.info("assemble_short: word-timing tier=%s", tier_used)
+    _log.info("assemble_short: word-timing tier=%s footage_source=%s", tier_used, footage_source)
 
-    event_queue.put(ProgressEvent(stage="Short Footage", message="Searching stock footage…"))
-    per_sentence_pools, fallback_pool = _collect_clips_per_sentence(script, providers, scene_dir, event_queue)
+    if footage_source == "ai_image":
+        event_queue.put(ProgressEvent(stage="Short Footage", message="Generating AI images…"))
+        per_sentence_pools, fallback_pool = _collect_ai_images_per_sentence(
+            script, image_gen_provider, photo_providers or [], scene_dir,
+            output_dimensions, event_queue,
+        )
+    elif footage_source == "image":
+        event_queue.put(ProgressEvent(stage="Short Footage", message="Searching stock photos…"))
+        per_sentence_pools, fallback_pool = _collect_images_per_sentence(
+            script, photo_providers or [], scene_dir, event_queue,
+        )
+    else:
+        event_queue.put(ProgressEvent(stage="Short Footage", message="Searching stock footage…"))
+        per_sentence_pools, fallback_pool = _collect_clips_per_sentence(script, providers, scene_dir, event_queue)
 
     resolved_pools: list[list[dict]] = []
     pool_sources: list[str] = []
@@ -587,41 +774,6 @@ def assemble_short(
             sentence_zero_pool_source=pool_sources[0] if pool_sources else "sentence",
         )
 
-    punch_window: tuple[float, float] | None = None
-    # (segment_index, rendered_path) of a punch card already rendered here, at plan-
-    # commit time — so the assembly loop below just reuses the file instead of
-    # re-rendering (and risking a second, later, unrecoverable failure that would
-    # truncate the final narration audio; see Task 12 review Finding 3 in the prior
-    # beat-sync/speed-ramp/punch/loop plan).
-    prerendered_punch: tuple[int, str] | None = None
-    if punch_enabled and script.punch is not None:
-        try:
-            new_segments, window = insert_punch_card_scoped(segments, script.punch, spans)
-            if window is not None:
-                punch_index = next(i for i, s in enumerate(new_segments) if s.is_punch)
-                punch_duration = window[1] - window[0]
-                rendered_path = str(scene_dir / f"seg_{punch_index:03d}_punch.mp4")
-                ffmpeg.generate_punch_card(
-                    rendered_path, script.punch[1], punch_duration, *output_dimensions,
-                )
-                segments = new_segments
-                punch_window = window
-                prerendered_punch = (punch_index, rendered_path)
-                event_queue.put(LogEvent(
-                    message=f"Punch card inserted: {script.punch[1]!r} at {window[0]:.2f}s",
-                    level=LogLevel.INFO,
-                ))
-            else:
-                event_queue.put(LogEvent(
-                    message="Punch card requested but could not be placed — skipping.",
-                    level=LogLevel.INFO,
-                ))
-        except Exception as exc:
-            event_queue.put(LogEvent(
-                message=f"Punch card failed ({exc}) — continuing without it.",
-                level=LogLevel.WARNING,
-            ))
-
     event_queue.put(ProgressEvent(stage="Short Assembly", message=f"Building {len(segments)} segments…"))
 
     segment_paths: list[str] = []
@@ -629,16 +781,6 @@ def assemble_short(
     max_sped_segments = len(segments) // 2
     first_window_start: float | None = None
     for seg in segments:
-        if seg.is_punch:
-            if prerendered_punch is not None and prerendered_punch[0] == seg.index:
-                segment_paths.append(prerendered_punch[1])
-                _log.info("Segment %d: using pre-rendered punch card %r", seg.index, seg.punch_text)
-            else:
-                _log.warning(
-                    "Segment %d: punch card flagged but no pre-rendered file available — dropping",
-                    seg.index,
-                )
-            continue
         clip = resolved_pools[seg.sentence_index][seg.clip_index]
         span = spans[seg.sentence_index] if seg.sentence_index is not None else None
         _log.info(
@@ -666,6 +808,19 @@ def assemble_short(
             first_window_start = window_start
         segment_paths.append(path)
 
+    hold_seconds = 0.0
+    if cinematic_ending_enabled and segment_paths:
+        try:
+            held_path = str(scene_dir / "seg_ending_hold.mp4")
+            ffmpeg.extend_with_held_frame(segment_paths[-1], held_path, SHORTS_ENDING_HOLD_SECONDS)
+            segment_paths[-1] = held_path
+            hold_seconds = SHORTS_ENDING_HOLD_SECONDS
+        except Exception as exc:
+            event_queue.put(LogEvent(
+                message=f"Cinematic ending hold failed ({exc}) — continuing without it.",
+                level=LogLevel.WARNING,
+            ))
+
     concat_path = str(scene_dir / "short_concat.mp4")
     ffmpeg.concat_segments_video_only(segment_paths, concat_path)
 
@@ -678,7 +833,7 @@ def assemble_short(
             ass_path = str(scene_dir / "captions.ass")
             write_ass_file(
                 timestamps, ass_path, *output_dimensions,
-                audio_duration=audio_duration, punch_window=punch_window,
+                audio_duration=audio_duration, style=caption_style,
             )
             captioned_path = str(scene_dir / "short_captioned.mp4")
             ffmpeg.burn_captions(video_for_mux, ass_path, captioned_path)
@@ -690,11 +845,33 @@ def assemble_short(
                 level=LogLevel.WARNING,
             ))
 
-    audio_for_mux = audio_path
+    voice_for_mux = audio_path
+    total_duration = audio_duration
+    if hold_seconds > 0:
+        try:
+            padded_path = str(scene_dir / "audio_padded.m4a")
+            ffmpeg.pad_audio_with_silence(audio_path, padded_path, hold_seconds)
+            voice_for_mux = padded_path
+            total_duration = audio_duration + hold_seconds
+            event_queue.put(LogEvent(
+                message=f"Cinematic ending: holding final frame for {hold_seconds:.1f}s "
+                        "(video/music continue, narration silent).",
+                level=LogLevel.INFO,
+            ))
+        except Exception as exc:
+            # video's held tail is still there, but mux_shorts_audio's -shortest
+            # will trim it back off to match this now-unpadded (shorter) audio —
+            # a safe, silent revert to pre-feature behavior, not a crash.
+            event_queue.put(LogEvent(
+                message=f"Cinematic ending audio padding failed ({exc}) — continuing without it.",
+                level=LogLevel.WARNING,
+            ))
+
+    audio_for_mux = voice_for_mux
     if music_path:
         try:
             mixed_audio = str(scene_dir / "audio_mixed.m4a")
-            ffmpeg.mix_music_bed(audio_path, music_path, audio_duration, mixed_audio, music_volume_db)
+            ffmpeg.mix_music_bed(voice_for_mux, music_path, total_duration, mixed_audio, music_volume_db)
             audio_for_mux = mixed_audio
             event_queue.put(LogEvent(
                 message=f"Music bed mixed in ({track_label}, provider={music_provider}, "

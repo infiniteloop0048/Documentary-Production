@@ -1,11 +1,7 @@
 """Unit tests for shorts_assembly's pure-ish helper functions: _build_segment
 (speed ramp + loop-revisit alternate window), _search_dedup/_collect_clips
 (footage fetch dedupe + download capping). ShortsFFmpeg and FootageProvider
-are always MagicMocks/fakes — no real ffmpeg calls or network.
-
-Note: the plan's brief for this test file also references _insert_punch_card
-(time-stealing math) — that helper is added in a later task and its import
-will be added back to this file when it lands."""
+are always MagicMocks/fakes — no real ffmpeg calls or network."""
 from __future__ import annotations
 
 import queue
@@ -15,12 +11,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from docu_studio.adapters.footage.base import FootageClip
+from docu_studio.adapters.image_gen.base import ImageGenProvider
+from docu_studio.adapters.photos.base import PhotoProvider, PhotoResult
+from docu_studio.pipeline.events import LogLevel
 from docu_studio.shorts.shorts_assembly import (
     SPEED_RAMP_FACTOR,
     _build_segment,
+    _collect_ai_images_per_sentence,
     _collect_clips,
     _collect_clips_per_sentence,
-    _insert_punch_card,
+    _collect_images_per_sentence,
     _search_dedup,
 )
 from docu_studio.shorts.shorts_cuts import Segment
@@ -182,95 +182,6 @@ class TestBuildSegmentLoopRevisit:
         )
 
         assert window_start == 5.0
-
-
-def _plain_segments(*durations: float) -> list[Segment]:
-    segs = []
-    start = 0.0
-    for i, d in enumerate(durations):
-        segs.append(Segment(index=i, start=start, duration=d, clip_index=i))
-        start += d
-    return segs
-
-
-class TestInsertPunchCard:
-    def test_shrinks_adjacent_segment_and_preserves_total_duration(self) -> None:
-        segments = _plain_segments(3.0, 3.0, 3.0)
-        total_before = sum(s.duration for s in segments)
-
-        new_segments, window = _insert_punch_card(
-            segments, punch=(1, "90 PERCENT"), sentence_starts=[0.0, 3.0, 6.0],
-        )
-
-        assert window is not None
-        assert sum(s.duration for s in new_segments) == pytest.approx(total_before)
-
-    def test_card_segment_is_flagged_and_carries_text(self) -> None:
-        segments = _plain_segments(3.0, 3.0, 3.0)
-        new_segments, window = _insert_punch_card(
-            segments, punch=(1, "90 PERCENT"), sentence_starts=[0.0, 3.0, 6.0],
-        )
-        punch_segs = [s for s in new_segments if s.is_punch]
-        assert len(punch_segs) == 1
-        assert punch_segs[0].punch_text == "90 PERCENT"
-        assert punch_segs[0].duration == pytest.approx(window[1] - window[0])
-
-    def test_card_placed_before_target_when_not_the_first_segment(self) -> None:
-        segments = _plain_segments(3.0, 3.0, 3.0)
-        new_segments, window = _insert_punch_card(
-            segments, punch=(1, "90 PERCENT"), sentence_starts=[0.0, 3.0, 6.0],
-        )
-        card_index = next(i for i, s in enumerate(new_segments) if s.is_punch)
-        # the shrunk original target must immediately follow the card
-        assert not new_segments[card_index + 1].is_punch
-        assert new_segments[card_index + 1].start == pytest.approx(window[1])
-
-    def test_card_steals_from_the_end_when_target_is_first_segment(self) -> None:
-        segments = _plain_segments(3.0, 3.0, 3.0)
-        new_segments, window = _insert_punch_card(
-            segments, punch=(0, "90 PERCENT"), sentence_starts=[0.0, 3.0, 6.0],
-        )
-        assert window is not None
-        assert window[0] > 0.0  # card doesn't start at t=0
-        first = new_segments[0]
-        assert not first.is_punch
-        assert first.start == 0.0
-
-    def test_returns_unchanged_when_no_footage_segments(self) -> None:
-        segments = [Segment(index=0, start=28.0, duration=1.75, clip_index=0, loop_revisit=True)]
-        new_segments, window = _insert_punch_card(
-            segments, punch=(0, "90 PERCENT"), sentence_starts=[0.0],
-        )
-        assert window is None
-        assert new_segments == segments
-
-    def test_skips_gracefully_when_target_segment_too_short_to_steal_from(self) -> None:
-        segments = _plain_segments(0.4, 3.0)  # first segment too short for a 1.0s card
-        new_segments, window = _insert_punch_card(
-            segments, punch=(0, "90 PERCENT"), sentence_starts=[0.0, 0.4],
-        )
-        assert window is None
-        assert new_segments == segments
-
-    def test_sentence_index_out_of_range_returns_unchanged(self) -> None:
-        segments = _plain_segments(3.0, 3.0)
-        new_segments, window = _insert_punch_card(
-            segments, punch=(5, "90 PERCENT"), sentence_starts=[0.0, 3.0],
-        )
-        assert window is None
-        assert new_segments == segments
-
-    def test_loop_revisit_segment_is_never_chosen_as_the_target(self) -> None:
-        segments = [
-            Segment(index=0, start=0.0, duration=3.0, clip_index=0),
-            Segment(index=1, start=3.0, duration=1.75, clip_index=0, loop_revisit=True),
-        ]
-        # sentence start lands exactly on the revisit segment's start
-        new_segments, window = _insert_punch_card(
-            segments, punch=(0, "90 PERCENT"), sentence_starts=[3.0],
-        )
-        assert window is not None
-        assert window[1] <= 3.0  # card placed within the non-revisit segment only
 
 
 class TestSearchDedupClipId:
@@ -550,6 +461,272 @@ class TestBuildSegmentOutputDimensions:
         assert vc_call[0][3:] == (1080, 1920)
         kb_call = ffmpeg.apply_ken_burns.call_args
         assert kb_call[0][5:] == (1080, 1920)
+
+
+class TestBuildSegmentImageBranch:
+    _IMAGE_CLIP = {"path": "/images/a.jpg", "width": 1920, "height": 1080, "kind": "image"}
+
+    def test_calls_apply_ken_burns_image_with_segment_duration_and_dimensions(
+        self, tmp_path: Path
+    ) -> None:
+        seg = Segment(index=1, start=0.0, duration=4.5, clip_index=0)
+        ffmpeg = MagicMock()
+
+        path, sped_count, window_start = _build_segment(
+            seg, self._IMAGE_CLIP, ffmpeg, tmp_path,
+            speed_ramp_enabled=True, sped_count=0, max_sped_segments=5,
+            output_dimensions=(1080, 1920),
+        )
+
+        ffmpeg.apply_ken_burns_image.assert_called_once()
+        call_args = ffmpeg.apply_ken_burns_image.call_args[0]
+        assert call_args[0] == "/images/a.jpg"
+        assert call_args[2] == pytest.approx(4.5)  # duration == seg.duration exactly
+        assert call_args[4:] == (1080, 1920)
+        assert sped_count == 0
+        assert window_start == 0.0
+
+    def test_skips_all_video_only_steps(self, tmp_path: Path) -> None:
+        seg = Segment(index=0, start=0.0, duration=3.0, clip_index=0)
+        ffmpeg = MagicMock()
+
+        _build_segment(
+            seg, self._IMAGE_CLIP, ffmpeg, tmp_path,
+            speed_ramp_enabled=True, sped_count=0, max_sped_segments=5,
+        )
+
+        ffmpeg.get_duration.assert_not_called()
+        ffmpeg.detect_motion_window.assert_not_called()
+        ffmpeg.trim_clip.assert_not_called()
+        ffmpeg.apply_speed_ramp.assert_not_called()
+        ffmpeg.vertical_convert.assert_not_called()
+        ffmpeg.apply_ken_burns.assert_not_called()
+
+    def test_direction_varies_by_segment_index(self, tmp_path: Path) -> None:
+        ffmpeg = MagicMock()
+        seg_a = Segment(index=0, start=0.0, duration=3.0, clip_index=0)
+        seg_b = Segment(index=1, start=3.0, duration=3.0, clip_index=0)
+
+        _build_segment(
+            seg_a, self._IMAGE_CLIP, ffmpeg, tmp_path,
+            speed_ramp_enabled=False, sped_count=0, max_sped_segments=5,
+        )
+        _build_segment(
+            seg_b, self._IMAGE_CLIP, ffmpeg, tmp_path,
+            speed_ramp_enabled=False, sped_count=0, max_sped_segments=5,
+        )
+
+        direction_a = ffmpeg.apply_ken_burns_image.call_args_list[0][0][3]
+        direction_b = ffmpeg.apply_ken_burns_image.call_args_list[1][0][3]
+        assert direction_a != direction_b
+
+    def test_missing_kind_defaults_to_video_path(self, tmp_path: Path) -> None:
+        # Backward compatibility: existing video pool-entry dicts always set
+        # "kind": "video" explicitly now, but the branch must not misfire on
+        # any dict that simply lacks the key.
+        seg = Segment(index=0, start=0.0, duration=3.0, clip_index=0)
+        ffmpeg = _ffmpeg(raw_duration=20.0, motion_start=2.0, method="motion")
+        clip_no_kind = {"path": "/clips/a.mp4", "width": 1920, "height": 1080}
+
+        _build_segment(
+            seg, clip_no_kind, ffmpeg, tmp_path,
+            speed_ramp_enabled=False, sped_count=0, max_sped_segments=5,
+        )
+
+        ffmpeg.apply_ken_burns_image.assert_not_called()
+        ffmpeg.apply_ken_burns.assert_called_once()
+
+
+class TestCollectImagesPerSentence:
+    def test_each_sentences_pool_only_contains_photos_from_its_own_query(self, tmp_path: Path) -> None:
+        def fake_search(query, page=1):
+            return [PhotoResult(url=f"https://cdn/{query}.jpg", width=1920, height=1080, photo_id=query)]
+
+        provider = MagicMock()
+        provider.search.side_effect = fake_search
+        script = _script(3)  # queries: "query 0", "query 1", "query 2"
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_resilient",
+            side_effect=lambda session, url, dest, last_request_at=None: Path(dest).write_bytes(b"x"),
+        ):
+            pools, _fallback = _collect_images_per_sentence(script, [provider], tmp_path, event_queue)
+
+        assert len(pools) == 3
+        for pool in pools:
+            assert len(pool) == 1
+            assert pool[0]["kind"] == "image"
+        paths = [pool[0]["path"] for pool in pools]
+        assert len(set(paths)) == 3  # each sentence's photo is a distinct download
+
+    def test_identical_photo_across_two_sentence_queries_is_not_downloaded_twice(self, tmp_path: Path) -> None:
+        shared_photo = PhotoResult(url="https://cdn/shared.jpg", width=1920, height=1080, photo_id="shared")
+        provider = MagicMock()
+        provider.search.side_effect = lambda query, page=1: [shared_photo]
+        script = _script(2)
+        event_queue: queue.Queue = queue.Queue()
+        download_calls: list[str] = []
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_resilient",
+            side_effect=lambda session, url, dest, last_request_at=None: (
+                download_calls.append(url), Path(dest).write_bytes(b"x"),
+            ),
+        ):
+            pools, _fallback = _collect_images_per_sentence(script, [provider], tmp_path, event_queue)
+
+        assert len(download_calls) == 1
+        assert len(pools[0]) == 1
+        assert len(pools[1]) == 0
+
+    def test_fallback_pool_is_built_from_the_first_sentences_query(self, tmp_path: Path) -> None:
+        def fake_search(query, page=1):
+            return [PhotoResult(url=f"https://cdn/{query}.jpg", width=1920, height=1080, photo_id=query)]
+
+        provider = MagicMock()
+        provider.search.side_effect = fake_search
+        script = _script(2)
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch(
+            "docu_studio.shorts.shorts_assembly.download_resilient",
+            side_effect=lambda session, url, dest, last_request_at=None: Path(dest).write_bytes(b"x"),
+        ):
+            _pools, fallback = _collect_images_per_sentence(script, [provider], tmp_path, event_queue)
+
+        assert len(fallback) == 1
+        assert fallback[0]["kind"] == "image"
+
+    def test_raises_when_no_provider_yields_any_photo(self, tmp_path: Path) -> None:
+        provider = MagicMock()
+        provider.search.return_value = []
+        script = _script(2)
+        event_queue: queue.Queue = queue.Queue()
+
+        with pytest.raises(RuntimeError, match="no images found"):
+            _collect_images_per_sentence(script, [provider], tmp_path, event_queue)
+
+
+class TestCollectAiImagesPerSentence:
+    def _make_script(self, n: int) -> ShortsScript:
+        return ShortsScript(
+            text="irrelevant",
+            sentences=[f"Sentence {i}." for i in range(n)],
+            visual_queries=[f"stock query {i}" for i in range(n)],
+            image_prompts=tuple(f"AI prompt {i}" for i in range(n)),
+        )
+
+    def test_successful_generation_produces_image_kind_entries(self, tmp_path: Path) -> None:
+        script = self._make_script(2)
+        provider = MagicMock(spec=ImageGenProvider)
+        provider.generate.return_value = b"\x89PNG fake bytes"
+        event_queue: queue.Queue = queue.Queue()
+
+        pools, fallback = _collect_ai_images_per_sentence(
+            script, provider, [], tmp_path, (1080, 1920), event_queue,
+        )
+
+        assert len(pools) == 2
+        assert all(len(p) == 1 for p in pools)
+        assert all(p[0]["kind"] == "image" for p in pools)
+        assert provider.generate.call_count == 2
+        provider.generate.assert_any_call("AI prompt 0", 1080, 1920)
+        assert Path(pools[0][0]["path"]).read_bytes() == b"\x89PNG fake bytes"
+
+    def test_generation_failure_falls_back_to_stock_photo_for_that_sentence(self, tmp_path: Path) -> None:
+        script = self._make_script(2)
+        provider = MagicMock(spec=ImageGenProvider)
+        provider.generate.side_effect = [
+            RuntimeError("content policy violation"),
+            b"\x89PNG fake bytes for sentence 1",
+        ]
+        stock_provider = MagicMock(spec=PhotoProvider)
+        stock_provider.search.return_value = [
+            PhotoResult(url="https://example.com/stock0.jpg", width=1200, height=1600, photo_id="p0"),
+        ]
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch("docu_studio.shorts.shorts_assembly.download_resilient") as mock_download:
+            mock_download.side_effect = lambda session, url, dest, last: Path(dest).write_bytes(b"stock jpg bytes")
+            pools, _fallback = _collect_ai_images_per_sentence(
+                script, provider, [stock_provider], tmp_path, (1080, 1920), event_queue,
+            )
+
+        assert pools[0][0]["kind"] == "image"
+        assert Path(pools[0][0]["path"]).read_bytes() == b"stock jpg bytes"
+        assert pools[1][0]["kind"] == "image"
+        assert Path(pools[1][0]["path"]).read_bytes() == b"\x89PNG fake bytes for sentence 1"
+        # search() is called once for sentence 0's per-sentence fallback and
+        # again for the topic-level fallback_pool build at the end — assert
+        # the per-sentence fallback call happened, not an exact call count:
+        stock_provider.search.assert_any_call("stock query 0", page=1)
+
+    def test_generation_failure_emits_warning_log_event(self, tmp_path: Path) -> None:
+        script = self._make_script(1)
+        provider = MagicMock(spec=ImageGenProvider)
+        provider.generate.side_effect = RuntimeError("rate limited")
+        stock_provider = MagicMock(spec=PhotoProvider)
+        stock_provider.search.return_value = [
+            PhotoResult(url="https://example.com/stock0.jpg", width=1200, height=1600, photo_id="p0"),
+        ]
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch("docu_studio.shorts.shorts_assembly.download_resilient") as mock_download:
+            mock_download.side_effect = lambda session, url, dest, last: Path(dest).write_bytes(b"stock bytes")
+            _collect_ai_images_per_sentence(
+                script, provider, [stock_provider], tmp_path, (1080, 1920), event_queue,
+            )
+
+        events = []
+        while not event_queue.empty():
+            events.append(event_queue.get_nowait())
+        warning_messages = [e.message for e in events if getattr(e, "level", None) == LogLevel.WARNING]
+        assert any("AI image generation failed" in m for m in warning_messages)
+
+    def test_both_ai_and_stock_fail_leaves_that_sentence_pool_empty(self, tmp_path: Path) -> None:
+        # Two sentences so the overall function doesn't hit its own
+        # both-totally-empty RuntimeError guard — sentence 0 fails
+        # completely (AI and stock both fail), sentence 1 succeeds via AI,
+        # isolating "one sentence's pool is empty" from "nothing anywhere".
+        script = self._make_script(2)
+        provider = MagicMock(spec=ImageGenProvider)
+        provider.generate.side_effect = [
+            RuntimeError("rate limited"),
+            b"\x89PNG fake bytes for sentence 1",
+        ]
+        stock_provider = MagicMock(spec=PhotoProvider)
+        stock_provider.search.return_value = []
+        event_queue: queue.Queue = queue.Queue()
+
+        pools, fallback = _collect_ai_images_per_sentence(
+            script, provider, [stock_provider], tmp_path, (1080, 1920), event_queue,
+        )
+
+        assert pools[0] == []
+        assert pools[1][0]["kind"] == "image"
+
+    def test_fallback_pool_built_from_stock_search_not_extra_ai_generation(self, tmp_path: Path) -> None:
+        script = self._make_script(1)
+        provider = MagicMock(spec=ImageGenProvider)
+        provider.generate.return_value = b"\x89PNG fake bytes"
+        stock_provider = MagicMock(spec=PhotoProvider)
+        stock_provider.search.return_value = [
+            PhotoResult(url="https://example.com/fallback0.jpg", width=1200, height=1600, photo_id="f0"),
+        ]
+        event_queue: queue.Queue = queue.Queue()
+
+        with patch("docu_studio.shorts.shorts_assembly.download_resilient") as mock_download:
+            mock_download.side_effect = lambda session, url, dest, last: Path(dest).write_bytes(b"fallback bytes")
+            _pools, fallback = _collect_ai_images_per_sentence(
+                script, provider, [stock_provider], tmp_path, (1080, 1920), event_queue,
+            )
+
+        # generate() called only once (for the one sentence) — the fallback
+        # pool must not trigger a second AI generation call:
+        assert provider.generate.call_count == 1
+        assert len(fallback) == 1
+        assert fallback[0]["kind"] == "image"
 
     def test_custom_dimensions_pass_through_to_vertical_convert_and_ken_burns(
         self, tmp_path: Path
